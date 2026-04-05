@@ -22,6 +22,24 @@ st.set_page_config(
 _theme = get_theme()
 apply_theme_css(_theme)
 
+st.markdown("""
+<style>
+[data-testid="stFormSubmitButton"] button {
+    background-color: #0F6E56 !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    font-weight: 600 !important;
+    font-size: 16px !important;
+    height: 50px !important;
+    width: 100% !important;
+    border-radius: 8px !important;
+}
+[data-testid="stFormSubmitButton"] button:hover {
+    background-color: #0A5240 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 # ── App-specific helpers (theme-aware closures) ───────────────────────────────
 def cpl_card(title, value, connected=True, muted=False):
@@ -317,25 +335,29 @@ def fetch_ga4_form_submissions(start, end):
         if int(r.metric_values[0].value) > 0
     ]
 
-    # By date (daily trend)
+    # By date + channel group (for stacked area chart)
     day_resp = client.run_report(RunReportRequest(
         property=prop,
         date_ranges=[DateRange(start_date=start, end_date=end)],
-        dimensions=[Dimension(name="date")],
+        dimensions=[Dimension(name="date"), Dimension(name="sessionDefaultChannelGroup")],
         metrics=[Metric(name="eventCount")],
         dimension_filter=gform_filter,
         order_bys=[OrderBy(dimension=OrderBy.DimensionOrderBy(dimension_name="date"))],
-        limit=400,
+        limit=2000,
     ))
-    daily = [
-        {"date": r.dimension_values[0].value, "count": int(r.metric_values[0].value)}
+    daily_by_channel = [
+        {
+            "date":    r.dimension_values[0].value,
+            "channel": r.dimension_values[1].value,
+            "count":   int(r.metric_values[0].value),
+        }
         for r in day_resp.rows
     ]
 
     return {
-        "total":    sum(c["count"] for c in channels),
-        "channels": channels,
-        "daily":    daily,
+        "total":            sum(c["count"] for c in channels),
+        "channels":         channels,
+        "daily_by_channel": daily_by_channel,
     }
 
 
@@ -597,30 +619,64 @@ if ext_ok and ext_data:
     st.markdown("<br>", unsafe_allow_html=True)
 
 
-# ── Row 4b: Form Submissions Over Time ───────────────────────────────────────
-if ga4_ok and form_data.get("daily"):
-    fs_daily = form_data["daily"]
-    fs_df = pd.DataFrame(fs_daily)
-    fs_df["date"] = pd.to_datetime(fs_df["date"], format="%Y%m%d")
-    fig_fs = go.Figure()
-    fig_fs.add_trace(go.Scatter(
-        x=fs_df["date"], y=fs_df["count"],
-        name="Form Submissions",
-        line=dict(color=theme["accent"], width=2.5),
-        fill="tozeroy", fillcolor=theme["fill_alpha"],
-        mode="lines+markers", marker=dict(size=5, color=theme["accent"]),
-        hovertemplate="%{x|%b %d}: %{y} submission(s)<extra></extra>",
-    ))
-    layout_fs = chart_layout("Form Submissions Over Time", "Date", "Form Submissions")
-    fig_fs.update_layout(**layout_fs, height=260)
-    st.plotly_chart(fig_fs, use_container_width=True)
-    st.markdown("<br>", unsafe_allow_html=True)
-elif ga4_ok:
-    st.markdown(
-        f'<p style="color:{theme["text_secondary"]};font-size:0.9rem;'
-        f'text-align:center;padding:1.5rem 0;">No form submissions recorded in this period</p>',
-        unsafe_allow_html=True,
-    )
+# ── Row 4b: Form Submissions Over Time (stacked by channel) ──────────────────
+FS_COLORS = ["#0F6E56", "#1A9E7A", "#5BB89A", "#9FD4C0", "#3D8B70", "#2A6B55"]
+
+if ga4_ok:
+    daily_by_ch = form_data.get("daily_by_channel", [])
+    if daily_by_ch:
+        raw_df = pd.DataFrame(daily_by_ch)
+        raw_df["date"] = pd.to_datetime(raw_df["date"], format="%Y%m%d")
+
+        # Pivot to wide: rows = date, cols = channel
+        pivot = raw_df.pivot_table(
+            index="date", columns="channel", values="count",
+            aggfunc="sum", fill_value=0,
+        )
+
+        # Reindex to fill every date in range with 0
+        full_range = pd.date_range(start=start_date, end=end_date, freq="D")
+        pivot = pivot.reindex(full_range, fill_value=0)
+        pivot.index.name = "date"
+
+        # Sort channels by total descending so biggest area is at bottom
+        channel_order = pivot.sum().sort_values(ascending=False).index.tolist()
+        pivot = pivot[channel_order]
+
+        y_max = int(pivot.sum(axis=1).max()) if not pivot.empty else 1
+
+        fig_fs = go.Figure()
+        def _hex_rgba(hex_color, alpha=0.35):
+            h = hex_color.lstrip("#")
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+            return f"rgba({r},{g},{b},{alpha})"
+
+        for i, ch in enumerate(channel_order):
+            color = FS_COLORS[i % len(FS_COLORS)]
+            fig_fs.add_trace(go.Scatter(
+                x=pivot.index, y=pivot[ch],
+                name=ch,
+                mode="lines",
+                line=dict(color=color, width=1.5),
+                fill="tonexty" if i > 0 else "tozeroy",
+                fillcolor=_hex_rgba(color),
+                stackgroup="one",
+                hovertemplate=f"<b>{ch}</b><br>%{{x|%b %d}}: %{{y}} submission(s)<extra></extra>",
+            ))
+
+        layout_fs = chart_layout(
+            "Form Submissions Over Time by Channel", "Date", "Form Submissions"
+        )
+        layout_fs["yaxis"]["range"] = [0, y_max + 1]
+        layout_fs["yaxis"]["dtick"] = 1
+        fig_fs.update_layout(**layout_fs, height=300)
+        st.plotly_chart(fig_fs, use_container_width=True)
+    else:
+        st.markdown(
+            f'<p style="color:{theme["text_secondary"]};font-size:0.9rem;'
+            f'text-align:center;padding:1.5rem 0;">No form submissions recorded in this period</p>',
+            unsafe_allow_html=True,
+        )
     st.markdown("<br>", unsafe_allow_html=True)
 
 
