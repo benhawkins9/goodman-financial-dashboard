@@ -1,70 +1,56 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from utils.sidebar import render_sidebar
+from utils.theme import get_theme, apply_theme_css
 
 import streamlit as st
 import plotly.graph_objects as go
-import plotly.express as px
 import pandas as pd
 
 st.set_page_config(page_title="LinkedIn — Goodman Financial", page_icon="💼",
                    layout="wide", initial_sidebar_state="expanded")
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-html,body,[class*="css"]{font-family:'Inter',sans-serif;}
-#MainMenu,footer,header{visibility:hidden;}
-.stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"],.main,.block-container{background-color:#F8F9FA!important;}
-[data-testid="stMarkdownContainer"] p,[data-testid="stMarkdownContainer"] li,[data-testid="stMarkdownContainer"] span{color:#1A1A2E!important;}
-.stCaption,[data-testid="stCaptionContainer"]{color:#6B7280!important;}
-label{color:#6B7280!important;}
-h1{color:#1A1A2E!important;font-weight:700;}h2{color:#1A1A2E!important;font-weight:600;}h3,h4{color:#0F6E56!important;font-weight:600;}
-[data-testid="stSidebar"]{background-color:#1C2B2B!important;}
-[data-testid="stSidebar"] *{color:#E8F0EF!important;}
-[data-testid="stSidebarNav"] a:hover{background-color:rgba(255,255,255,0.10)!important;}
-[data-testid="stSidebarNav"] a[aria-selected="true"]{background-color:#0F6E56!important;border-left:3px solid #1A9E7A;}
-.stButton>button[kind="primary"]{background-color:#0F6E56!important;border-color:#0F6E56!important;color:#FFFFFF!important;font-weight:600;border-radius:6px;}
-.stButton>button:not([kind="primary"]){background-color:#FFFFFF!important;border-color:#E2E8E4!important;color:#1A1A2E!important;border-radius:6px;}
-.stTabs [data-baseweb="tab-list"]{background-color:transparent;border-bottom:2px solid #E2E8E4;}
-.stTabs [data-baseweb="tab"]{color:#6B7280!important;}
-.stTabs [data-baseweb="tab"][aria-selected="true"]{border-bottom:3px solid #0F6E56!important;color:#1A1A2E!important;font-weight:600;}
-[data-testid="stDataFrame"]{border:1px solid #E2E8E4;border-radius:8px;}
-[data-testid="stAlert"]{background-color:#F0F7F4!important;border-color:#E2E8E4!important;}
-hr{border-color:#E2E8E4!important;}
-</style>
-""", unsafe_allow_html=True)
-
 if not st.session_state.get("authenticated"):
     st.warning("Please sign in from the **Overview** page.")
     st.stop()
-
-COLORS = ["#0F6E56", "#1A9E7A", "#5BB89A", "#8ECFC0", "#3D8B70", "#2A6B55"]
 
 dates = render_sidebar()
 start_date = dates["start_date"]
 end_date   = dates["end_date"]
 
+theme  = get_theme()
+apply_theme_css(theme)
+COLORS = theme["colors"]
+
+
 def kpi_card(title, value):
-    return f"""<div style="background:#FFFFFF;border:1px solid #E2E8E4;border-left:4px solid #0F6E56;
-                border-radius:8px;padding:1.1rem 1.25rem;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-        <p style="color:#6B7280;font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 6px;">{title}</p>
-        <h2 style="color:#1A1A2E;font-size:28px;font-weight:600;margin:0;">{value}</h2>
-    </div>"""
+    return (
+        f'<div style="background:{theme["card_bg"]};border:1px solid {theme["card_border"]};'
+        f'border-left:4px solid {theme["accent"]};border-radius:8px;padding:1.1rem 1.25rem;'
+        f'box-shadow:0 1px 3px rgba(0,0,0,0.08);">'
+        f'<p style="color:{theme["text_secondary"]};font-size:11px;font-weight:500;'
+        f'text-transform:uppercase;letter-spacing:0.05em;margin:0 0 6px;">{title}</p>'
+        f'<h2 style="color:{theme["text_primary"]};font-size:28px;font-weight:600;margin:0;">{value}</h2>'
+        f'</div>'
+    )
+
 
 def chart_layout(title="", xaxis_title="", yaxis_title=""):
     return dict(
-        title=dict(text=title, font=dict(size=15, color="#1A1A2E"), x=0),
-        plot_bgcolor="#FAFAFA", paper_bgcolor="#FFFFFF",
-        font=dict(family="Inter, sans-serif", color="#1A1A2E"),
-        xaxis=dict(title=xaxis_title, gridcolor="#F0F0F0", linecolor="#E2E8E4",
-                   color="#6B7280", tickfont=dict(color="#6B7280"), title_font=dict(color="#6B7280")),
-        yaxis=dict(title=yaxis_title, gridcolor="#F0F0F0", linecolor="#E2E8E4",
-                   color="#6B7280", tickfont=dict(color="#6B7280"), title_font=dict(color="#6B7280")),
+        title=dict(text=title, font=dict(size=15, color=theme["chart_font"]), x=0),
+        plot_bgcolor=theme["chart_plot_bg"], paper_bgcolor=theme["chart_bg"],
+        font=dict(family="Inter, sans-serif", color=theme["chart_font"]),
+        xaxis=dict(title=xaxis_title, gridcolor=theme["chart_grid"], linecolor=theme["chart_line"],
+                   color=theme["chart_axis"], tickfont=dict(color=theme["chart_axis"]),
+                   title_font=dict(color=theme["chart_axis"])),
+        yaxis=dict(title=yaxis_title, gridcolor=theme["chart_grid"], linecolor=theme["chart_line"],
+                   color=theme["chart_axis"], tickfont=dict(color=theme["chart_axis"]),
+                   title_font=dict(color=theme["chart_axis"])),
         margin=dict(t=50, b=40, l=50, r=20),
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#1A1A2E")),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color=theme["chart_font"])),
         hovermode="x unified",
     )
+
 
 COLUMN_MAP = {
     "impressions": "Impressions", "impression": "Impressions", "total impressions": "Impressions",
@@ -215,7 +201,7 @@ if cat_cols and num_cols:
             x=grouped[metric], y=grouped[group_by].astype(str).str[:40], orientation="h",
             marker_color=COLORS[0],
             text=grouped[metric].apply(lambda v: f"{v:,.0f}"),
-            textposition="outside", textfont=dict(color="#1A1A2E"),
+            textposition="outside", textfont=dict(color=theme["chart_font"]),
         ))
         layout2 = chart_layout(f"{metric} by {group_by}")
         layout2["yaxis"]["autorange"] = "reversed"

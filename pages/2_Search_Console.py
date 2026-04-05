@@ -1,6 +1,7 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from utils.sidebar import render_sidebar
+from utils.theme import get_theme, apply_theme_css, kpi_card, chart_layout, pct_delta
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -9,36 +10,9 @@ import pandas as pd
 st.set_page_config(page_title="Search Console — Goodman Financial", page_icon="🔍",
                    layout="wide", initial_sidebar_state="expanded")
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-html,body,[class*="css"]{font-family:'Inter',sans-serif;}
-#MainMenu,footer,header{visibility:hidden;}
-.stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"],.main,.block-container{background-color:#F8F9FA!important;}
-[data-testid="stMarkdownContainer"] p,[data-testid="stMarkdownContainer"] li,[data-testid="stMarkdownContainer"] span{color:#1A1A2E!important;}
-.stCaption,[data-testid="stCaptionContainer"]{color:#6B7280!important;}
-label{color:#6B7280!important;}
-h1{color:#1A1A2E!important;font-weight:700;}h2{color:#1A1A2E!important;font-weight:600;}h3,h4{color:#0F6E56!important;font-weight:600;}
-[data-testid="stSidebar"]{background-color:#1C2B2B!important;}
-[data-testid="stSidebar"] *{color:#E8F0EF!important;}
-[data-testid="stSidebarNav"] a:hover{background-color:rgba(255,255,255,0.10)!important;}
-[data-testid="stSidebarNav"] a[aria-selected="true"]{background-color:#0F6E56!important;border-left:3px solid #1A9E7A;}
-.stButton>button[kind="primary"]{background-color:#0F6E56!important;border-color:#0F6E56!important;color:#FFFFFF!important;font-weight:600;border-radius:6px;}
-.stButton>button:not([kind="primary"]){background-color:#FFFFFF!important;border-color:#E2E8E4!important;color:#1A1A2E!important;border-radius:6px;}
-.stTabs [data-baseweb="tab-list"]{background-color:transparent;border-bottom:2px solid #E2E8E4;}
-.stTabs [data-baseweb="tab"]{color:#6B7280!important;}
-.stTabs [data-baseweb="tab"][aria-selected="true"]{border-bottom:3px solid #0F6E56!important;color:#1A1A2E!important;font-weight:600;}
-[data-testid="stDataFrame"]{border:1px solid #E2E8E4;border-radius:8px;}
-[data-testid="stAlert"]{background-color:#F0F7F4!important;border-color:#E2E8E4!important;}
-hr{border-color:#E2E8E4!important;}
-</style>
-""", unsafe_allow_html=True)
-
 if not st.session_state.get("authenticated"):
     st.warning("Please sign in from the **Overview** page.")
     st.stop()
-
-COLORS = ["#0F6E56", "#1A9E7A", "#5BB89A", "#8ECFC0", "#3D8B70", "#2A6B55"]
 
 dates = render_sidebar()
 start_date, end_date   = dates["start_date"], dates["end_date"]
@@ -47,40 +21,9 @@ compare_enabled        = dates["compare_enabled"]
 prior_start_str        = dates["prior_start_str"]
 prior_end_str          = dates["prior_end_str"]
 
-
-def pct_delta(curr, prev):
-    if prev is None or prev == 0 or curr is None:
-        return None
-    return ((curr - prev) / abs(prev)) * 100
-
-
-def kpi_card(title, value, delta=None, lower_is_better=False):
-    delta_html = ""
-    if delta is not None:
-        positive = (delta >= 0 and not lower_is_better) or (delta < 0 and lower_is_better)
-        clr   = "#0F6E56" if positive else "#C0392B"
-        arrow = "▲" if delta >= 0 else "▼"
-        delta_html = f'<p style="color:{clr};font-size:12px;margin:4px 0 0;">{arrow} {abs(delta):.1f}%</p>'
-    return f"""<div style="background:#FFFFFF;border:1px solid #E2E8E4;border-left:4px solid #0F6E56;
-                border-radius:8px;padding:1.1rem 1.25rem;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-        <p style="color:#6B7280;font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 6px;">{title}</p>
-        <h2 style="color:#1A1A2E;font-size:28px;font-weight:600;margin:0;">{value}</h2>
-        {delta_html}</div>"""
-
-
-def chart_layout(title="", xaxis_title="", yaxis_title=""):
-    return dict(
-        title=dict(text=title, font=dict(size=15, color="#1A1A2E"), x=0),
-        plot_bgcolor="#FAFAFA", paper_bgcolor="#FFFFFF",
-        font=dict(family="Inter, sans-serif", color="#1A1A2E"),
-        xaxis=dict(title=xaxis_title, gridcolor="#F0F0F0", linecolor="#E2E8E4",
-                   color="#6B7280", tickfont=dict(color="#6B7280"), title_font=dict(color="#6B7280")),
-        yaxis=dict(title=yaxis_title, gridcolor="#F0F0F0", linecolor="#E2E8E4",
-                   color="#6B7280", tickfont=dict(color="#6B7280"), title_font=dict(color="#6B7280")),
-        margin=dict(t=50, b=40, l=50, r=20),
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#1A1A2E")),
-        hovermode="x unified",
-    )
+theme  = get_theme()
+apply_theme_css(theme)
+COLORS = theme["colors"]
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -186,7 +129,7 @@ kpis = [
     ("Avg Position", f"{data['position']:.1f}",  pct_delta(data['position'],    prior_data['position']    if prior_data else None), True),
 ]
 for col, (title, val, delta, lib) in zip([c1, c2, c3, c4], kpis):
-    col.markdown(kpi_card(title, val, delta, lib), unsafe_allow_html=True)
+    col.markdown(kpi_card(title, val, delta, lower_is_better=lib), unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
 
@@ -226,32 +169,36 @@ if not daily_df.empty:
     with tab1:
         fig = go.Figure()
         fig.add_trace(go.Bar(x=daily_df["date"], y=daily_df["impressions"],
-                             name="Impressions", marker_color="rgba(15,110,86,0.12)", yaxis="y2"))
+                             name="Impressions", marker_color=theme["bar_fill"], yaxis="y2"))
         fig.add_trace(go.Scatter(x=daily_df["date"], y=daily_df["clicks"],
-                                 name="Clicks", line=dict(color="#0F6E56", width=2.5)))
+                                 name="Clicks", line=dict(color=COLORS[0], width=2.5)))
         layout_args = chart_layout("Clicks vs Impressions", "Date")
         layout_args["barmode"] = "overlay"
-        layout_args["yaxis"]  = dict(title="Clicks", gridcolor="#F0F0F0", color="#6B7280",
-                                     tickfont=dict(color="#6B7280"), title_font=dict(color="#6B7280"))
+        layout_args["yaxis"]  = dict(title="Clicks", gridcolor=theme["chart_grid"],
+                                     color=theme["chart_axis"], tickfont=dict(color=theme["chart_axis"]),
+                                     title_font=dict(color=theme["chart_axis"]))
         layout_args["yaxis2"] = dict(title="Impressions", overlaying="y", side="right",
-                                     gridcolor="rgba(0,0,0,0)", color="#6B7280",
-                                     tickfont=dict(color="#6B7280"), title_font=dict(color="#6B7280"))
+                                     gridcolor="rgba(0,0,0,0)", color=theme["chart_axis"],
+                                     tickfont=dict(color=theme["chart_axis"]),
+                                     title_font=dict(color=theme["chart_axis"]))
         fig.update_layout(**layout_args)
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(x=daily_df["date"], y=daily_df["ctr"],
-                                  name="CTR (%)", line=dict(color="#0F6E56", width=2.5)))
+                                  name="CTR (%)", line=dict(color=COLORS[0], width=2.5)))
         fig2.add_trace(go.Scatter(x=daily_df["date"], y=daily_df["position"],
-                                  name="Avg Position", line=dict(color="#1A9E7A", width=2, dash="dot"),
+                                  name="Avg Position", line=dict(color=COLORS[1], width=2, dash="dot"),
                                   yaxis="y2"))
         layout_args2 = chart_layout("CTR & Avg Position", "Date")
-        layout_args2["yaxis"]  = dict(title="CTR (%)", gridcolor="#F0F0F0", color="#6B7280",
-                                      tickfont=dict(color="#6B7280"), title_font=dict(color="#6B7280"))
+        layout_args2["yaxis"]  = dict(title="CTR (%)", gridcolor=theme["chart_grid"],
+                                      color=theme["chart_axis"], tickfont=dict(color=theme["chart_axis"]),
+                                      title_font=dict(color=theme["chart_axis"]))
         layout_args2["yaxis2"] = dict(title="Avg Position (lower = better)", overlaying="y", side="right",
-                                      autorange="reversed", gridcolor="rgba(0,0,0,0)", color="#6B7280",
-                                      tickfont=dict(color="#6B7280"), title_font=dict(color="#6B7280"))
+                                      autorange="reversed", gridcolor="rgba(0,0,0,0)",
+                                      color=theme["chart_axis"], tickfont=dict(color=theme["chart_axis"]),
+                                      title_font=dict(color=theme["chart_axis"]))
         fig2.update_layout(**layout_args2)
         st.plotly_chart(fig2, use_container_width=True)
 
@@ -267,7 +214,7 @@ if not queries_df.empty:
             x=top10["clicks"], y=top10["query"].str[:45], orientation="h",
             marker_color=COLORS[0],
             text=top10["clicks"].apply(lambda v: f"{v:,}"),
-            textposition="outside", textfont=dict(color="#1A1A2E"),
+            textposition="outside", textfont=dict(color=theme["chart_font"]),
         ))
         layout3 = chart_layout("Top Queries by Clicks")
         layout3["yaxis"]["autorange"] = "reversed"
@@ -284,7 +231,7 @@ if not pages_df.empty:
             x=top10p["clicks"], y=top10p["page_short"], orientation="h",
             marker_color=COLORS[1],
             text=top10p["clicks"].apply(lambda v: f"{v:,}"),
-            textposition="outside", textfont=dict(color="#1A1A2E"),
+            textposition="outside", textfont=dict(color=theme["chart_font"]),
         ))
         layout4 = chart_layout("Top Pages by Clicks")
         layout4["yaxis"]["autorange"] = "reversed"

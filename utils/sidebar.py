@@ -1,5 +1,5 @@
 """
-Shared sidebar renderer — persists date range and compare toggle in
+Shared sidebar renderer — persists date range, compare toggle, and dark mode in
 st.session_state so selections survive page navigation.
 """
 import streamlit as st
@@ -33,17 +33,23 @@ def render_sidebar() -> dict:
     today = datetime.today().date()
 
     # ── initialise session-state defaults (only on first run) ──────────────
-    st.session_state.setdefault("date_range_opt",   "Last 30 days")
-    st.session_state.setdefault("compare_enabled",  False)
+    st.session_state.setdefault("date_range_opt",    "Last 30 days")
+    st.session_state.setdefault("compare_enabled",   False)
     st.session_state.setdefault("custom_start_date", today - timedelta(days=30))
     st.session_state.setdefault("custom_end_date",   today)
+    st.session_state.setdefault("dark_mode",         False)
 
     with st.sidebar:
         st.markdown("### 📊 Goodman Financial")
         st.markdown("---")
+
+        # ── Dark / light mode toggle ────────────────────────────────────────
+        st.toggle("🌙 Dark Mode", key="dark_mode")
+        st.markdown("---")
+
+        # ── Date range ──────────────────────────────────────────────────────
         st.markdown("**Date Range**")
 
-        # selectbox — key writes back to session_state automatically
         range_opt = st.selectbox(
             "Range",
             RANGE_OPTIONS,
