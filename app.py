@@ -9,6 +9,7 @@ from utils.sidebar import render_sidebar
 from utils.theme import (
     get_theme, apply_theme_css, kpi_card, chart_layout,
     pct_delta, fmt_number, fmt_currency, fmt_pct, fmt_duration,
+    CHANNEL_COLORS, channel_color,
 )
 
 st.set_page_config(
@@ -446,13 +447,16 @@ with st.spinner("Loading data from all channels…"):
 
 # ── Fetch prior period ────────────────────────────────────────────────────────
 p_ga4 = p_gsc = p_meta = p_li = None
-p_form_data = {"total": 0, "channels": []}
+p_ext_data  = None
+p_form_data = {"total": 0, "channels": [], "daily_by_channel": []}
 if compare_enabled and prior_start_str:
     with st.spinner("Loading prior period…"):
-        try: p_ga4  = fetch_ga4_summary(prior_start_str, prior_end_str)
+        try: p_ga4      = fetch_ga4_summary(prior_start_str, prior_end_str)
+        except: pass
+        try: p_ext_data = fetch_ga4_extended(prior_start_str, prior_end_str)
         except: pass
         try: p_form_data = fetch_ga4_form_submissions(prior_start_str, prior_end_str)
-        except: p_form_data = {"total": 0, "channels": []}
+        except: p_form_data = {"total": 0, "channels": [], "daily_by_channel": []}
         try: p_gsc  = fetch_gsc_summary(prior_start_str, prior_end_str)
         except: pass
         try: p_meta = fetch_meta_summary(prior_start_str, prior_end_str)
@@ -526,14 +530,28 @@ st.markdown("<br>", unsafe_allow_html=True)
 
 # ── Row 2: Traffic Quality Scorecard ─────────────────────────────────────────
 if ext_ok and ext_data:
-    q = ext_data["quality"]
+    q  = ext_data["quality"]
+    pq = p_ext_data["quality"] if p_ext_data else None
     st.markdown(f'<p style="color:{theme["text_secondary"]};font-size:11px;font-weight:500;'
                 f'text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;">Traffic Quality</p>',
                 unsafe_allow_html=True)
-    tq1, tq2, tq3 = st.columns(3)
-    tq1.markdown(kpi_card("Engagement Rate",    f"{q['engagement_rate']:.1f}%"),  unsafe_allow_html=True)
-    tq2.markdown(kpi_card("Avg Session",        fmt_duration(q['avg_session_duration'])), unsafe_allow_html=True)
-    tq3.markdown(kpi_card("Pages / Session",    f"{q['pages_per_session']:.2f}"), unsafe_allow_html=True)
+    tq1, tq2, tq3, tq4 = st.columns(4)
+    tq1.markdown(kpi_card("Engagement Rate",
+                           f"{q['engagement_rate']:.1f}%",
+                           delta=pct_delta(q['engagement_rate'],       pq['engagement_rate'])       if pq else None),
+                 unsafe_allow_html=True)
+    tq2.markdown(kpi_card("Avg Session",
+                           fmt_duration(q['avg_session_duration']),
+                           delta=pct_delta(q['avg_session_duration'],   pq['avg_session_duration'])  if pq else None),
+                 unsafe_allow_html=True)
+    tq3.markdown(kpi_card("Pages / Session",
+                           f"{q['pages_per_session']:.2f}",
+                           delta=pct_delta(q['pages_per_session'],      pq['pages_per_session'])     if pq else None),
+                 unsafe_allow_html=True)
+    tq4.markdown(kpi_card("Form Submissions",
+                           fmt_number(form_leads),
+                           delta=pct_delta(form_leads, p_form_data["total"]) if compare_enabled else None),
+                 unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
 
@@ -543,9 +561,10 @@ col_left, col_right = st.columns(2)
 with col_left:
     if ga4_ok and ga4_data and ga4_data.get("channels"):
         ch_df = pd.DataFrame(ga4_data["channels"]).sort_values("sessions")
+        bar_colors = [channel_color(c) for c in ch_df["channel"]]
         fig = go.Figure(go.Bar(
             x=ch_df["sessions"], y=ch_df["channel"], orientation="h",
-            marker_color=theme["colors"][0],
+            marker_color=bar_colors,
             text=ch_df["sessions"].apply(lambda v: f"{v:,}"),
             textposition="outside", textfont=dict(color=theme["chart_font"]),
         ))
@@ -558,19 +577,40 @@ with col_left:
 with col_right:
     form_ch = form_data.get("channels", [])
     if ga4_ok and form_ch:
-        fs_df = pd.DataFrame(form_ch).sort_values("count")
-        n = len(fs_df)
-        bar_colors = [theme["colors"][i % len(theme["colors"])] for i in range(n)]
-        fig2 = go.Figure(go.Bar(
-            x=fs_df["count"], y=fs_df["channel"], orientation="h",
+        # Merge current + prior channels into aligned lists
+        all_channels = sorted({r["channel"] for r in form_ch}
+                              | {r["channel"] for r in p_form_data.get("channels", [])},
+                              key=lambda c: -next((r["count"] for r in form_ch if r["channel"] == c), 0))
+        cur_map  = {r["channel"]: r["count"] for r in form_ch}
+        pri_map  = {r["channel"]: r["count"] for r in p_form_data.get("channels", [])}
+        bar_colors = [channel_color(c) for c in all_channels]
+
+        fig2 = go.Figure()
+        fig2.add_trace(go.Bar(
+            x=[cur_map.get(c, 0) for c in all_channels],
+            y=all_channels, orientation="h",
+            name="Current Period",
             marker_color=bar_colors,
-            text=fs_df["count"], textposition="outside",
-            textfont=dict(color=theme["chart_font"]),
+            text=[cur_map.get(c, 0) for c in all_channels],
+            textposition="outside", textfont=dict(color=theme["chart_font"]),
         ))
-        fig2.update_layout(
-            **chart_layout("Form Submissions by Channel", compact=True),
-            height=max(200, n * 42 + 60),
-        )
+        if compare_enabled and p_form_data.get("channels"):
+            # Lighter version of same colors for prior period
+            def _lighten(hex_color, alpha=0.45):
+                h = hex_color.lstrip("#")
+                r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+                return f"rgba({r},{g},{b},{alpha})"
+            fig2.add_trace(go.Bar(
+                x=[pri_map.get(c, 0) for c in all_channels],
+                y=all_channels, orientation="h",
+                name="Prior Period",
+                marker_color=[_lighten(channel_color(c)) for c in all_channels],
+                text=[pri_map.get(c, 0) for c in all_channels],
+                textposition="outside", textfont=dict(color=theme["chart_font"]),
+            ))
+        layout2 = chart_layout("Form Submissions by Channel", compact=True)
+        layout2["barmode"] = "group"
+        fig2.update_layout(**layout2, height=max(200, len(all_channels) * 52 + 60))
         st.plotly_chart(fig2, use_container_width=True)
     else:
         st.markdown(kpi_card("Form Submissions by Channel", "No form data yet", muted=True),
@@ -620,8 +660,6 @@ if ext_ok and ext_data:
 
 
 # ── Row 4b: Form Submissions Over Time (stacked by channel) ──────────────────
-FS_COLORS = ["#0F6E56", "#1A9E7A", "#5BB89A", "#9FD4C0", "#3D8B70", "#2A6B55"]
-
 if ga4_ok:
     daily_by_ch = form_data.get("daily_by_channel", [])
     if daily_by_ch:
@@ -652,7 +690,7 @@ if ga4_ok:
             return f"rgba({r},{g},{b},{alpha})"
 
         for i, ch in enumerate(channel_order):
-            color = FS_COLORS[i % len(FS_COLORS)]
+            color = channel_color(ch, fallback_index=i)
             fig_fs.add_trace(go.Scatter(
                 x=pivot.index, y=pivot[ch],
                 name=ch,

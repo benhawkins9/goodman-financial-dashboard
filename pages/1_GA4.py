@@ -1,7 +1,7 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from utils.sidebar import render_sidebar
-from utils.theme import get_theme, apply_theme_css, kpi_card, chart_layout, pct_delta, fmt_duration
+from utils.theme import get_theme, apply_theme_css, kpi_card, chart_layout, pct_delta, fmt_duration, CHANNEL_COLORS, channel_color
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -245,11 +245,12 @@ sources_df = pd.DataFrame(data["sources"])
 if not sources_df.empty:
     col_l, col_r = st.columns(2)
     with col_l:
+        ch_colors = [channel_color(c) for c in sources_df["channel"]]
         fig_bar = go.Figure(go.Bar(
             x=sources_df["sessions"],
             y=sources_df["channel"],
             orientation="h",
-            marker_color=COLORS[0],
+            marker_color=ch_colors,
             text=sources_df["sessions"].apply(lambda v: f"{v:,}"),
             textposition="outside", textfont=dict(color=theme["chart_font"]),
         ))
@@ -258,8 +259,9 @@ if not sources_df.empty:
         fig_bar.update_layout(**layout_bar, height=360)
         st.plotly_chart(fig_bar, use_container_width=True)
     with col_r:
+        donut_colors = [channel_color(c) for c in sources_df["channel"]]
         fig_donut = px.pie(sources_df, values="sessions", names="channel",
-                           hole=0.52, color_discrete_sequence=COLORS)
+                           hole=0.52, color_discrete_sequence=donut_colors)
         fig_donut.update_layout(**chart_layout("Sessions by Channel"), showlegend=True)
         fig_donut.update_traces(textinfo="percent+label",
                                 hovertemplate="%{label}: %{value:,} sessions",
@@ -369,7 +371,7 @@ if not events_df.empty:
                 for i, ch in enumerate(pivot.columns):
                     fig_evs.add_trace(go.Bar(
                         name=ch, x=pivot.index, y=pivot[ch],
-                        marker_color=COLORS[i % len(COLORS)],
+                        marker_color=channel_color(ch, fallback_index=i),
                     ))
                 layout_evs = chart_layout("Top Events by Channel", "Event", "Count")
                 layout_evs["barmode"] = "group"

@@ -47,6 +47,32 @@ DARK = {
 }
 
 
+# ── Channel color map ─────────────────────────────────────────────────────────
+# Consistent colors across every channel-based chart on every page.
+CHANNEL_COLORS = {
+    "Direct":          "#4CAF50",
+    "Organic Search":  "#2196F3",
+    "Referral":        "#FF9800",
+    "Organic Social":  "#9C27B0",
+    "Email":           "#00BCD4",
+    "Paid Search":     "#F44336",
+    "Paid Social":     "#E91E63",
+    "Organic Video":   "#FF5722",
+    "Organic Shopping":"#8BC34A",
+    "Unassigned":      "#9E9E9E",
+}
+
+_CHANNEL_FALLBACKS = list(CHANNEL_COLORS.values())
+
+
+def channel_color(channel: str, fallback_index: int = 0) -> str:
+    """Return the canonical color for a GA4 channel group name."""
+    return CHANNEL_COLORS.get(
+        channel,
+        _CHANNEL_FALLBACKS[fallback_index % len(_CHANNEL_FALLBACKS)],
+    )
+
+
 def get_theme() -> dict:
     """Return the active theme dict based on st.session_state['dark_mode']."""
     return DARK if st.session_state.get("dark_mode", False) else LIGHT
