@@ -83,6 +83,23 @@ def get_gf_auth():
     return api_key, sig, expires
 
 
+# ── API debug ─────────────────────────────────────────────────────────────────
+def test_gf_connection():
+    api_key, sig, expires = get_gf_auth()
+    base = st.secrets["GF_SITE_URL"].rstrip("/")
+
+    # Test basic API connectivity
+    test_url = f"{base}/gravityformsapi/?api_key={api_key}&signature={sig}&expires={expires}"
+
+    try:
+        resp = requests.get(test_url, timeout=30)
+        st.write("Status code:", resp.status_code)
+        st.write("Response headers:", dict(resp.headers))
+        st.write("Raw response (first 500 chars):", resp.text[:500])
+    except Exception as e:
+        st.write("Connection error:", str(e))
+
+
 # ── Fetch entries ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_gf_entries(start_date, end_date):
@@ -187,6 +204,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown("---")
+
+if st.button("Test API Connection"):
+    test_gf_connection()
 
 
 # ── Fetch data ────────────────────────────────────────────────────────────────
