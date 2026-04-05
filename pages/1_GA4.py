@@ -159,15 +159,68 @@ if compare_enabled and prior_start_str and prior_end_str:
 
 
 # ── KPI Cards ────────────────────────────────────────────────────────────────
-c1, c2, c3, c4, c5 = st.columns(5)
+# Extract form submissions count from events data (fetched later, so pre-compute here)
+# We fetch a targeted count inline since it's needed for the KPI row
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_form_submissions(start, end, property_id, project_id, private_key_id,
+                           private_key, client_email, client_id, client_x509):
+    from google.analytics.data_v1beta import BetaAnalyticsDataClient
+    from google.analytics.data_v1beta.types import (
+        RunReportRequest, DateRange, Dimension, Metric,
+        FilterExpression, Filter,
+    )
+    from google.oauth2 import service_account
+    creds_dict = {
+        "type": "service_account", "project_id": project_id,
+        "private_key_id": private_key_id,
+        "private_key": private_key.replace("\\n", "\n"),
+        "client_email": client_email, "client_id": client_id,
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_x509_cert_url": client_x509, "universe_domain": "googleapis.com",
+    }
+    creds = service_account.Credentials.from_service_account_info(
+        creds_dict, scopes=["https://www.googleapis.com/auth/analytics.readonly"])
+    client = BetaAnalyticsDataClient(credentials=creds)
+    resp = client.run_report(RunReportRequest(
+        property=f"properties/{property_id}",
+        date_ranges=[DateRange(start_date=start, end_date=end)],
+        dimensions=[Dimension(name="eventName")],
+        metrics=[Metric(name="eventCount")],
+        dimension_filter=FilterExpression(filter=Filter(
+            field_name="eventName",
+            string_filter=Filter.StringFilter(
+                value="gform_submission",
+                match_type=Filter.StringFilter.MatchType.EXACT,
+            )
+        )),
+        limit=1,
+    ))
+    return int(resp.rows[0].metric_values[0].value) if resp.rows else 0
+
+
+form_submissions = 0
+prior_form_submissions = 0
+try:
+    form_submissions = fetch_form_submissions(
+        start_str, end_str, property_id, *_creds_args)
+    if compare_enabled and prior_start_str:
+        prior_form_submissions = fetch_form_submissions(
+            prior_start_str, prior_end_str, property_id, *_creds_args)
+except Exception:
+    pass
+
+c1, c2, c3, c4, c5, c6 = st.columns(6)
 kpis = [
     ("Sessions",     f"{data['sessions']:,}",             pct_delta(data['sessions'],     prior_data['sessions']     if prior_data else None)),
     ("Active Users", f"{data['users']:,}",                pct_delta(data['users'],        prior_data['users']        if prior_data else None)),
     ("Page Views",   f"{data['pageviews']:,}",            pct_delta(data['pageviews'],    prior_data['pageviews']    if prior_data else None)),
     ("Bounce Rate",  f"{data['bounce_rate']:.1f}%",       pct_delta(data['bounce_rate'],  prior_data['bounce_rate']  if prior_data else None)),
     ("Avg Session",  fmt_duration(data["avg_duration"]),  pct_delta(data['avg_duration'], prior_data['avg_duration'] if prior_data else None)),
+    ("Form Submissions", f"{form_submissions:,}",         pct_delta(form_submissions, prior_form_submissions if compare_enabled else None)),
 ]
-for col, (title, val, delta) in zip([c1, c2, c3, c4, c5], kpis):
+for col, (title, val, delta) in zip([c1, c2, c3, c4, c5, c6], kpis):
     col.markdown(kpi_card(title, val, delta), unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -271,10 +324,19 @@ st.markdown("<br>", unsafe_allow_html=True)
 st.markdown("#### Events")
 events_df = pd.DataFrame(data["events"])
 if not events_df.empty:
-    top_events = events_df.head(4)
-    ev_cols = st.columns(len(top_events))
-    for i, (_, row_ev) in enumerate(top_events.iterrows()):
-        ev_cols[i].markdown(kpi_card(row_ev["event"], f"{row_ev['count']:,}"), unsafe_allow_html=True)
+    # Always show gform_submission prominently if present
+    gform_row = events_df[events_df["event"] == "gform_submission"]
+    other_top = events_df[events_df["event"] != "gform_submission"].head(4)
+    highlight_cards = []
+    if not gform_row.empty:
+        highlight_cards.append(("Form Submissions", int(gform_row.iloc[0]["count"])))
+    highlight_cards += [(r["event"], int(r["count"])) for _, r in other_top.iterrows()]
+    highlight_cards = highlight_cards[:5]
+
+    if highlight_cards:
+        ev_cols = st.columns(len(highlight_cards))
+        for i, (ev_title, ev_count) in enumerate(highlight_cards):
+            ev_cols[i].markdown(kpi_card(ev_title, f"{ev_count:,}"), unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
     col_ev_l, col_ev_r = st.columns(2)

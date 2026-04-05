@@ -67,8 +67,15 @@ html,body,[class*="css"]{{font-family:'Inter',sans-serif;}}
 label{{color:{ts}!important;}}
 h1{{color:{tp}!important;font-weight:700;}}h2{{color:{tp}!important;font-weight:600;}}h3,h4{{color:{ac}!important;font-weight:600;}}
 [data-testid="stSidebar"]{{background-color:#1C2B2B!important;}}
-[data-testid="stSidebar"] *{{color:#E8F0EF!important;}}
-[data-testid="stSidebarNav"] a:hover{{background-color:rgba(255,255,255,0.10)!important;}}
+[data-testid="stSidebar"] *{{color:#E8F5E9!important;}}
+[data-testid="stSidebar"] label{{color:#9AC89E!important;}}
+[data-testid="stSidebar"] p{{color:#9AC89E!important;}}
+[data-testid="stSidebar"] small{{color:#9AC89E!important;}}
+[data-testid="stSidebar"] .stCaption{{color:#9AC89E!important;}}
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{{color:#9AC89E!important;}}
+[data-testid="stSidebar"] h1,[data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3{{color:#FFFFFF!important;}}
+[data-testid="stSidebarNav"] a{{color:#E8F5E9!important;}}
+[data-testid="stSidebarNav"] a:hover{{background-color:rgba(255,255,255,0.10)!important;color:#FFFFFF!important;}}
 [data-testid="stSidebarNav"] a[aria-selected="true"]{{background-color:#0F6E56!important;border-left:3px solid #1A9E7A;}}
 .stButton>button[kind="primary"]{{background-color:{ac}!important;border-color:{ac}!important;color:#FFFFFF!important;font-weight:600;border-radius:6px;}}
 .stButton>button[kind="primary"]:hover{{background-color:{theme['accent_2']}!important;border-color:{theme['accent_2']}!important;}}
