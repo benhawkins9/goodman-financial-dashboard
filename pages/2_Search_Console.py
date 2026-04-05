@@ -1,6 +1,9 @@
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from utils.sidebar import render_sidebar
+
 import streamlit as st
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
 import pandas as pd
 
 st.set_page_config(page_title="Search Console — Goodman Financial", page_icon="🔍",
@@ -11,22 +14,23 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 html,body,[class*="css"]{font-family:'Inter',sans-serif;}
 #MainMenu,footer,header{visibility:hidden;}
-.stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"],.main,.block-container{background-color:#0F1A14!important;}
-[data-testid="stMarkdownContainer"] p,[data-testid="stMarkdownContainer"] li,[data-testid="stMarkdownContainer"] span{color:#E8F5E9!important;}
-.stCaption,[data-testid="stCaptionContainer"]{color:#9AC89E!important;}
-label{color:#9AC89E!important;}
-h1{color:#E8F5E9!important;font-weight:700;}h2{color:#E8F5E9!important;font-weight:600;}h3,h4{color:#9AC89E!important;font-weight:600;}
-[data-testid="stSidebar"]{background-color:#0F6E56!important;}
-[data-testid="stSidebar"] *{color:rgba(255,255,255,0.92)!important;}
-[data-testid="stSidebarNav"] a[aria-selected="true"]{background-color:rgba(255,255,255,0.18)!important;border-left:3px solid white;}
-.stButton>button[kind="primary"]{background-color:#4CAF50!important;border-color:#4CAF50!important;color:#0F1A14!important;font-weight:700;border-radius:6px;}
-.stButton>button:not([kind="primary"]){background-color:#1A2E22!important;border-color:#2A4A35!important;color:#E8F5E9!important;border-radius:6px;}
-.stTabs [data-baseweb="tab-list"]{background-color:transparent;border-bottom:2px solid #2A4A35;}
-.stTabs [data-baseweb="tab"]{color:#9AC89E!important;}
-.stTabs [data-baseweb="tab"][aria-selected="true"]{border-bottom:3px solid #4CAF50!important;color:#E8F5E9!important;font-weight:600;}
-[data-testid="stDataFrame"]{border:1px solid #2A4A35;border-radius:8px;}
-[data-testid="stAlert"]{background-color:#1A2E22!important;border-color:#2A4A35!important;}
-hr{border-color:#2A4A35!important;}
+.stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"],.main,.block-container{background-color:#F8F9FA!important;}
+[data-testid="stMarkdownContainer"] p,[data-testid="stMarkdownContainer"] li,[data-testid="stMarkdownContainer"] span{color:#1A1A2E!important;}
+.stCaption,[data-testid="stCaptionContainer"]{color:#6B7280!important;}
+label{color:#6B7280!important;}
+h1{color:#1A1A2E!important;font-weight:700;}h2{color:#1A1A2E!important;font-weight:600;}h3,h4{color:#0F6E56!important;font-weight:600;}
+[data-testid="stSidebar"]{background-color:#1C2B2B!important;}
+[data-testid="stSidebar"] *{color:#E8F0EF!important;}
+[data-testid="stSidebarNav"] a:hover{background-color:rgba(255,255,255,0.10)!important;}
+[data-testid="stSidebarNav"] a[aria-selected="true"]{background-color:#0F6E56!important;border-left:3px solid #1A9E7A;}
+.stButton>button[kind="primary"]{background-color:#0F6E56!important;border-color:#0F6E56!important;color:#FFFFFF!important;font-weight:600;border-radius:6px;}
+.stButton>button:not([kind="primary"]){background-color:#FFFFFF!important;border-color:#E2E8E4!important;color:#1A1A2E!important;border-radius:6px;}
+.stTabs [data-baseweb="tab-list"]{background-color:transparent;border-bottom:2px solid #E2E8E4;}
+.stTabs [data-baseweb="tab"]{color:#6B7280!important;}
+.stTabs [data-baseweb="tab"][aria-selected="true"]{border-bottom:3px solid #0F6E56!important;color:#1A1A2E!important;font-weight:600;}
+[data-testid="stDataFrame"]{border:1px solid #E2E8E4;border-radius:8px;}
+[data-testid="stAlert"]{background-color:#F0F7F4!important;border-color:#E2E8E4!important;}
+hr{border-color:#E2E8E4!important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -34,96 +38,100 @@ if not st.session_state.get("authenticated"):
     st.warning("Please sign in from the **Overview** page.")
     st.stop()
 
-COLORS = ["#4CAF50", "#2DB896", "#66BB6A", "#81C784", "#1A9E7A", "#0F6E56"]
+COLORS = ["#0F6E56", "#1A9E7A", "#5BB89A", "#8ECFC0", "#3D8B70", "#2A6B55"]
+
+dates = render_sidebar()
+start_date, end_date   = dates["start_date"], dates["end_date"]
+start_str,  end_str    = dates["start_str"],  dates["end_str"]
+compare_enabled        = dates["compare_enabled"]
+prior_start_str        = dates["prior_start_str"]
+prior_end_str          = dates["prior_end_str"]
+
+
+def pct_delta(curr, prev):
+    if prev is None or prev == 0 or curr is None:
+        return None
+    return ((curr - prev) / abs(prev)) * 100
+
 
 def kpi_card(title, value, delta=None, lower_is_better=False):
     delta_html = ""
     if delta is not None:
         positive = (delta >= 0 and not lower_is_better) or (delta < 0 and lower_is_better)
-        clr = "#4CAF50" if positive else "#EF5350"
+        clr   = "#0F6E56" if positive else "#C0392B"
         arrow = "▲" if delta >= 0 else "▼"
-        delta_html = f'<p style="color:{clr};font-size:0.82rem;margin:4px 0 0;">{arrow} {abs(delta):.1f}%</p>'
-    return f"""<div style="background:#1A2E22;border:1px solid #2A4A35;border-left:4px solid #4CAF50;
-                border-radius:8px;padding:1.1rem 1.25rem;">
-        <p style="color:#9AC89E;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.06em;margin:0 0 6px;">{title}</p>
-        <h2 style="color:#4CAF50;font-size:1.7rem;font-weight:700;margin:0;">{value}</h2>
+        delta_html = f'<p style="color:{clr};font-size:12px;margin:4px 0 0;">{arrow} {abs(delta):.1f}%</p>'
+    return f"""<div style="background:#FFFFFF;border:1px solid #E2E8E4;border-left:4px solid #0F6E56;
+                border-radius:8px;padding:1.1rem 1.25rem;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+        <p style="color:#6B7280;font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 6px;">{title}</p>
+        <h2 style="color:#1A1A2E;font-size:28px;font-weight:600;margin:0;">{value}</h2>
         {delta_html}</div>"""
+
 
 def chart_layout(title="", xaxis_title="", yaxis_title=""):
     return dict(
-        title=dict(text=title, font=dict(size=15, color="#E8F5E9"), x=0),
-        plot_bgcolor="#0F1A14", paper_bgcolor="#0F1A14",
-        font=dict(family="Inter, sans-serif", color="#E8F5E9"),
-        xaxis=dict(title=xaxis_title, gridcolor="#1A2E22", linecolor="#2A4A35",
-                   color="#9AC89E", tickfont=dict(color="#9AC89E"), title_font=dict(color="#9AC89E")),
-        yaxis=dict(title=yaxis_title, gridcolor="#1A2E22", linecolor="#2A4A35",
-                   color="#9AC89E", tickfont=dict(color="#9AC89E"), title_font=dict(color="#9AC89E")),
+        title=dict(text=title, font=dict(size=15, color="#1A1A2E"), x=0),
+        plot_bgcolor="#FAFAFA", paper_bgcolor="#FFFFFF",
+        font=dict(family="Inter, sans-serif", color="#1A1A2E"),
+        xaxis=dict(title=xaxis_title, gridcolor="#F0F0F0", linecolor="#E2E8E4",
+                   color="#6B7280", tickfont=dict(color="#6B7280"), title_font=dict(color="#6B7280")),
+        yaxis=dict(title=yaxis_title, gridcolor="#F0F0F0", linecolor="#E2E8E4",
+                   color="#6B7280", tickfont=dict(color="#6B7280"), title_font=dict(color="#6B7280")),
         margin=dict(t=50, b=40, l=50, r=20),
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#E8F5E9")),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#1A1A2E")),
         hovermode="x unified",
     )
 
-with st.sidebar:
-    st.markdown("### 📊 Goodman Financial")
-    st.markdown("---")
-    st.markdown("**Date Range**")
-    range_opt = st.selectbox("Range", ["Last 7 days", "Last 30 days", "Last 90 days", "Custom"],
-                             index=1, label_visibility="collapsed")
-    today = datetime.today().date()
-    if range_opt == "Last 7 days":     start_date, end_date = today - timedelta(days=7), today
-    elif range_opt == "Last 30 days":  start_date, end_date = today - timedelta(days=30), today
-    elif range_opt == "Last 90 days":  start_date, end_date = today - timedelta(days=90), today
-    else:
-        start_date = st.date_input("Start", value=today - timedelta(days=30))
-        end_date   = st.date_input("End",   value=today)
-    st.caption(f"{start_date.strftime('%b %d')} – {end_date.strftime('%b %d, %Y')}")
-    st.markdown("---")
-    if st.button("Sign Out", use_container_width=True):
-        st.session_state.authenticated = False
-        st.rerun()
-
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_gsc(start: str, end: str, site_url: str):
+def fetch_gsc(start: str, end: str, site_url: str,
+              project_id: str, private_key_id: str, private_key: str,
+              client_email: str, client_id: str, client_x509: str):
     from googleapiclient.discovery import build
     from google.oauth2 import service_account
 
     creds_dict = {
         "type": "service_account",
-        "project_id": st.secrets["GA4_PROJECT_ID"],
-        "private_key_id": st.secrets["GA4_PRIVATE_KEY_ID"],
-        "private_key": st.secrets["GA4_PRIVATE_KEY"].replace("\\n", "\n"),
-        "client_email": st.secrets["GA4_CLIENT_EMAIL"],
-        "client_id": st.secrets["GA4_CLIENT_ID"],
+        "project_id": project_id,
+        "private_key_id": private_key_id,
+        "private_key": private_key.replace("\\n", "\n"),
+        "client_email": client_email,
+        "client_id": client_id,
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
         "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-        "client_x509_cert_url": st.secrets["GA4_CLIENT_X509_CERT_URL"],
+        "client_x509_cert_url": client_x509,
         "universe_domain": "googleapis.com",
     }
     credentials = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=["https://www.googleapis.com/auth/webmasters.readonly"])
     service = build("searchconsole", "v1", credentials=credentials)
 
-    def query(dimensions, row_limit=25):
+    def query(dimensions, row_limit=100, date_start=start, date_end=end):
         return service.searchanalytics().query(
             siteUrl=site_url,
-            body={"startDate": start, "endDate": end, "dimensions": dimensions, "rowLimit": row_limit},
+            body={"startDate": date_start, "endDate": date_end,
+                  "dimensions": dimensions, "rowLimit": row_limit},
         ).execute()
 
     totals_row = query([]).get("rows", [{}])[0]
 
     daily_rows = [{"date": r["keys"][0], "clicks": int(r["clicks"]),
-                   "impressions": int(r["impressions"]), "ctr": r["ctr"]*100, "position": r["position"]}
+                   "impressions": int(r["impressions"]), "ctr": r["ctr"] * 100,
+                   "position": r["position"]}
                   for r in query(["date"], 90).get("rows", [])]
 
     queries_rows = [{"query": r["keys"][0], "clicks": int(r["clicks"]),
-                     "impressions": int(r["impressions"]), "ctr": round(r["ctr"]*100,2), "position": round(r["position"],1)}
-                    for r in query(["query"], 50).get("rows", [])]
+                     "impressions": int(r["impressions"]),
+                     "ctr": round(r["ctr"] * 100, 2),
+                     "position": round(r["position"], 1)}
+                    for r in query(["query"], 200).get("rows", [])]
 
     pages_rows = [{"page": r["keys"][0], "clicks": int(r["clicks"]),
-                   "impressions": int(r["impressions"]), "ctr": round(r["ctr"]*100,2), "position": round(r["position"],1)}
-                  for r in query(["page"], 50).get("rows", [])]
+                   "impressions": int(r["impressions"]),
+                   "ctr": round(r["ctr"] * 100, 2),
+                   "position": round(r["position"], 1)}
+                  for r in query(["page"], 200).get("rows", [])]
 
     return {
         "clicks":      int(totals_row.get("clicks", 0)),
@@ -139,29 +147,75 @@ st.markdown("## Google Search Console")
 st.markdown(f"**{start_date.strftime('%B %d')} – {end_date.strftime('%B %d, %Y')}** · Google organic only")
 st.markdown("---")
 
-start_str = start_date.strftime("%Y-%m-%d")
-end_str   = end_date.strftime("%Y-%m-%d")
-
 try:
-    site_url = st.secrets["GSC_SITE_URL"]
-except KeyError:
-    st.error("GSC_SITE_URL is missing from secrets.toml")
+    site_url         = st.secrets["GSC_SITE_URL"]
+    _project_id      = st.secrets["GA4_PROJECT_ID"]
+    _private_key_id  = st.secrets["GA4_PRIVATE_KEY_ID"]
+    _private_key     = st.secrets["GA4_PRIVATE_KEY"]
+    _client_email    = st.secrets["GA4_CLIENT_EMAIL"]
+    _client_id       = st.secrets["GA4_CLIENT_ID"]
+    _client_x509     = st.secrets["GA4_CLIENT_X509_CERT_URL"]
+except KeyError as e:
+    st.error(f"Missing secret: {e}")
     st.stop()
+
+_creds_args = (_project_id, _private_key_id, _private_key, _client_email, _client_id, _client_x509)
 
 with st.spinner("Fetching Search Console data…"):
     try:
-        data = fetch_gsc(start_str, end_str, site_url)
+        data = fetch_gsc(start_str, end_str, site_url, *_creds_args)
     except Exception as e:
         st.error(f"Could not load Search Console data: {e}")
         st.stop()
 
+prior_data = None
+if compare_enabled and prior_start_str and prior_end_str:
+    with st.spinner("Fetching comparison period…"):
+        try:
+            prior_data = fetch_gsc(prior_start_str, prior_end_str, site_url, *_creds_args)
+        except Exception:
+            prior_data = None
+
+
 # ── KPI Cards ────────────────────────────────────────────────────────────────
 c1, c2, c3, c4 = st.columns(4)
-c1.markdown(kpi_card("Total Clicks",  f"{data['clicks']:,}"),          unsafe_allow_html=True)
-c2.markdown(kpi_card("Impressions",   f"{data['impressions']:,}"),      unsafe_allow_html=True)
-c3.markdown(kpi_card("Avg CTR",       f"{data['ctr']:.2f}%"),           unsafe_allow_html=True)
-c4.markdown(kpi_card("Avg Position",  f"{data['position']:.1f}", lower_is_better=True), unsafe_allow_html=True)
+kpis = [
+    ("Total Clicks", f"{data['clicks']:,}",     pct_delta(data['clicks'],      prior_data['clicks']      if prior_data else None), False),
+    ("Impressions",  f"{data['impressions']:,}", pct_delta(data['impressions'], prior_data['impressions'] if prior_data else None), False),
+    ("Avg CTR",      f"{data['ctr']:.2f}%",      pct_delta(data['ctr'],         prior_data['ctr']         if prior_data else None), False),
+    ("Avg Position", f"{data['position']:.1f}",  pct_delta(data['position'],    prior_data['position']    if prior_data else None), True),
+]
+for col, (title, val, delta, lib) in zip([c1, c2, c3, c4], kpis):
+    col.markdown(kpi_card(title, val, delta, lib), unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
+
+
+# ── Brand keyword & branded/non-branded split ─────────────────────────────────
+st.markdown("#### Branded vs Non-Branded")
+brand_kw = st.text_input(
+    "Brand keyword (used to split branded vs. non-branded queries)",
+    key="brand_keyword",
+    placeholder="e.g. goodman",
+)
+if brand_kw:
+    queries_df_all = pd.DataFrame(data["queries"])
+    if not queries_df_all.empty:
+        branded_mask   = queries_df_all["query"].str.contains(brand_kw, case=False, na=False)
+        branded_df     = queries_df_all[branded_mask]
+        non_branded_df = queries_df_all[~branded_mask]
+
+        br_clicks  = int(branded_df["clicks"].sum())
+        nbr_clicks = int(non_branded_df["clicks"].sum())
+        br_impr    = int(branded_df["impressions"].sum())
+        nbr_impr   = int(non_branded_df["impressions"].sum())
+
+        bc1, bc2, bc3, bc4 = st.columns(4)
+        bc1.markdown(kpi_card("Branded Clicks",     f"{br_clicks:,}"),  unsafe_allow_html=True)
+        bc2.markdown(kpi_card("Non-Branded Clicks", f"{nbr_clicks:,}"), unsafe_allow_html=True)
+        bc3.markdown(kpi_card("Branded Impr.",      f"{br_impr:,}"),    unsafe_allow_html=True)
+        bc4.markdown(kpi_card("Non-Branded Impr.",  f"{nbr_impr:,}"),   unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
 
 # ── Daily trend ──────────────────────────────────────────────────────────────
 daily_df = pd.DataFrame(data["daily"])
@@ -172,32 +226,32 @@ if not daily_df.empty:
     with tab1:
         fig = go.Figure()
         fig.add_trace(go.Bar(x=daily_df["date"], y=daily_df["impressions"],
-                             name="Impressions", marker_color="rgba(76,175,80,0.18)", yaxis="y2"))
+                             name="Impressions", marker_color="rgba(15,110,86,0.12)", yaxis="y2"))
         fig.add_trace(go.Scatter(x=daily_df["date"], y=daily_df["clicks"],
-                                 name="Clicks", line=dict(color="#4CAF50", width=2.5)))
+                                 name="Clicks", line=dict(color="#0F6E56", width=2.5)))
         layout_args = chart_layout("Clicks vs Impressions", "Date")
         layout_args["barmode"] = "overlay"
-        layout_args["yaxis"]  = dict(title="Clicks", gridcolor="#1A2E22", color="#9AC89E",
-                                     tickfont=dict(color="#9AC89E"), title_font=dict(color="#9AC89E"))
+        layout_args["yaxis"]  = dict(title="Clicks", gridcolor="#F0F0F0", color="#6B7280",
+                                     tickfont=dict(color="#6B7280"), title_font=dict(color="#6B7280"))
         layout_args["yaxis2"] = dict(title="Impressions", overlaying="y", side="right",
-                                     gridcolor="rgba(0,0,0,0)", color="#9AC89E",
-                                     tickfont=dict(color="#9AC89E"), title_font=dict(color="#9AC89E"))
+                                     gridcolor="rgba(0,0,0,0)", color="#6B7280",
+                                     tickfont=dict(color="#6B7280"), title_font=dict(color="#6B7280"))
         fig.update_layout(**layout_args)
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(x=daily_df["date"], y=daily_df["ctr"],
-                                  name="CTR (%)", line=dict(color="#4CAF50", width=2.5)))
+                                  name="CTR (%)", line=dict(color="#0F6E56", width=2.5)))
         fig2.add_trace(go.Scatter(x=daily_df["date"], y=daily_df["position"],
-                                  name="Avg Position", line=dict(color="#2DB896", width=2, dash="dot"),
+                                  name="Avg Position", line=dict(color="#1A9E7A", width=2, dash="dot"),
                                   yaxis="y2"))
         layout_args2 = chart_layout("CTR & Avg Position", "Date")
-        layout_args2["yaxis"]  = dict(title="CTR (%)", gridcolor="#1A2E22", color="#9AC89E",
-                                      tickfont=dict(color="#9AC89E"), title_font=dict(color="#9AC89E"))
+        layout_args2["yaxis"]  = dict(title="CTR (%)", gridcolor="#F0F0F0", color="#6B7280",
+                                      tickfont=dict(color="#6B7280"), title_font=dict(color="#6B7280"))
         layout_args2["yaxis2"] = dict(title="Avg Position (lower = better)", overlaying="y", side="right",
-                                      autorange="reversed", gridcolor="rgba(0,0,0,0)", color="#9AC89E",
-                                      tickfont=dict(color="#9AC89E"), title_font=dict(color="#9AC89E"))
+                                      autorange="reversed", gridcolor="rgba(0,0,0,0)", color="#6B7280",
+                                      tickfont=dict(color="#6B7280"), title_font=dict(color="#6B7280"))
         fig2.update_layout(**layout_args2)
         st.plotly_chart(fig2, use_container_width=True)
 
@@ -213,7 +267,7 @@ if not queries_df.empty:
             x=top10["clicks"], y=top10["query"].str[:45], orientation="h",
             marker_color=COLORS[0],
             text=top10["clicks"].apply(lambda v: f"{v:,}"),
-            textposition="outside", textfont=dict(color="#E8F5E9"),
+            textposition="outside", textfont=dict(color="#1A1A2E"),
         ))
         layout3 = chart_layout("Top Queries by Clicks")
         layout3["yaxis"]["autorange"] = "reversed"
@@ -230,25 +284,92 @@ if not pages_df.empty:
             x=top10p["clicks"], y=top10p["page_short"], orientation="h",
             marker_color=COLORS[1],
             text=top10p["clicks"].apply(lambda v: f"{v:,}"),
-            textposition="outside", textfont=dict(color="#E8F5E9"),
+            textposition="outside", textfont=dict(color="#1A1A2E"),
         ))
         layout4 = chart_layout("Top Pages by Clicks")
         layout4["yaxis"]["autorange"] = "reversed"
         fig4.update_layout(**layout4, height=400)
         st.plotly_chart(fig4, use_container_width=True)
 
-# ── Detail tables ─────────────────────────────────────────────────────────────
+
+# ── Queries table with pagination + search ────────────────────────────────────
 st.markdown("#### Top Queries — Detail")
 if not queries_df.empty:
-    st.dataframe(queries_df.rename(columns={"query": "Query", "clicks": "Clicks",
-                                            "impressions": "Impressions", "ctr": "CTR (%)", "position": "Avg Position"}),
-                 use_container_width=True, hide_index=True, height=400)
+    q_search = st.text_input("Search queries", key="gsc_queries_search", placeholder="Filter by keyword…")
+    if "gsc_queries_last_search" not in st.session_state:
+        st.session_state["gsc_queries_last_search"] = ""
+    if q_search != st.session_state["gsc_queries_last_search"]:
+        st.session_state["gsc_queries_page"] = 0
+        st.session_state["gsc_queries_last_search"] = q_search
 
+    filtered_q = queries_df
+    if q_search:
+        filtered_q = queries_df[queries_df["query"].str.contains(q_search, case=False, na=False)]
+
+    PAGE_SIZE = 10
+    st.session_state.setdefault("gsc_queries_page", 0)
+    total_q     = len(filtered_q)
+    total_q_pgs = max(1, (total_q + PAGE_SIZE - 1) // PAGE_SIZE)
+    cur_q_pg    = max(0, min(st.session_state["gsc_queries_page"], total_q_pgs - 1))
+    st.session_state["gsc_queries_page"] = cur_q_pg
+
+    q_slice = filtered_q.iloc[cur_q_pg * PAGE_SIZE: (cur_q_pg + 1) * PAGE_SIZE]
+    st.dataframe(
+        q_slice.rename(columns={"query": "Query", "clicks": "Clicks",
+                                 "impressions": "Impressions", "ctr": "CTR (%)", "position": "Avg Position"}),
+        use_container_width=True, hide_index=True,
+    )
+    col_p, col_i, col_n = st.columns([1, 3, 1])
+    with col_p:
+        if st.button("← Previous", disabled=(cur_q_pg == 0), key="gsc_q_prev"):
+            st.session_state["gsc_queries_page"] -= 1
+            st.rerun()
+    with col_i:
+        st.caption(f"Page {cur_q_pg + 1} of {total_q_pgs} · {total_q:,} queries")
+    with col_n:
+        if st.button("Next →", disabled=(cur_q_pg >= total_q_pgs - 1), key="gsc_q_next"):
+            st.session_state["gsc_queries_page"] += 1
+            st.rerun()
+
+
+# ── Pages table with pagination + search ──────────────────────────────────────
 st.markdown("#### Top Pages — Detail")
 if not pages_df.empty:
-    st.dataframe(pages_df.rename(columns={"page": "Page URL", "clicks": "Clicks",
-                                          "impressions": "Impressions", "ctr": "CTR (%)", "position": "Avg Position"}),
-                 use_container_width=True, hide_index=True, height=400)
+    p_search = st.text_input("Search pages", key="gsc_pages_search", placeholder="Filter by URL…")
+    if "gsc_pages_last_search" not in st.session_state:
+        st.session_state["gsc_pages_last_search"] = ""
+    if p_search != st.session_state["gsc_pages_last_search"]:
+        st.session_state["gsc_pages_page"] = 0
+        st.session_state["gsc_pages_last_search"] = p_search
+
+    filtered_p = pages_df
+    if p_search:
+        filtered_p = pages_df[pages_df["page"].str.contains(p_search, case=False, na=False)]
+
+    PAGE_SIZE = 10
+    st.session_state.setdefault("gsc_pages_page", 0)
+    total_p     = len(filtered_p)
+    total_p_pgs = max(1, (total_p + PAGE_SIZE - 1) // PAGE_SIZE)
+    cur_p_pg    = max(0, min(st.session_state["gsc_pages_page"], total_p_pgs - 1))
+    st.session_state["gsc_pages_page"] = cur_p_pg
+
+    p_slice = filtered_p.iloc[cur_p_pg * PAGE_SIZE: (cur_p_pg + 1) * PAGE_SIZE]
+    st.dataframe(
+        p_slice.rename(columns={"page": "Page URL", "clicks": "Clicks",
+                                 "impressions": "Impressions", "ctr": "CTR (%)", "position": "Avg Position"}),
+        use_container_width=True, hide_index=True,
+    )
+    col_p2, col_i2, col_n2 = st.columns([1, 3, 1])
+    with col_p2:
+        if st.button("← Previous", disabled=(cur_p_pg == 0), key="gsc_p_prev"):
+            st.session_state["gsc_pages_page"] -= 1
+            st.rerun()
+    with col_i2:
+        st.caption(f"Page {cur_p_pg + 1} of {total_p_pgs} · {total_p:,} pages")
+    with col_n2:
+        if st.button("Next →", disabled=(cur_p_pg >= total_p_pgs - 1), key="gsc_p_next"):
+            st.session_state["gsc_pages_page"] += 1
+            st.rerun()
 
 st.markdown("---")
 st.caption(f"Data source: Google Search Console · {site_url} · Refreshed hourly")
