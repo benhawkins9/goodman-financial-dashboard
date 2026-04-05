@@ -275,11 +275,12 @@ def fetch_ga4_extended(start, end):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_ga4_form_submissions(start, end):
-    """Return gform_submission counts broken down by channel group.
+    """Return gform_submission counts by channel and by date.
 
     Returns a dict with:
       "total"    – int, sum across all channels
       "channels" – list of {"channel": str, "count": int}, sorted desc
+      "daily"    – list of {"date": str (YYYYMMDD), "count": int}, sorted asc
     """
     from google.analytics.data_v1beta import BetaAnalyticsDataClient
     from google.analytics.data_v1beta.types import (
@@ -291,27 +292,51 @@ def fetch_ga4_form_submissions(start, end):
         _build_creds_dict(), scopes=["https://www.googleapis.com/auth/analytics.readonly"])
     client = BetaAnalyticsDataClient(credentials=creds)
     prop = f"properties/{st.secrets['GA4_PROPERTY_ID']}"
-    resp = client.run_report(RunReportRequest(
+
+    gform_filter = FilterExpression(filter=Filter(
+        field_name="eventName",
+        string_filter=Filter.StringFilter(
+            value="gform_submission",
+            match_type=Filter.StringFilter.MatchType.EXACT,
+        )
+    ))
+
+    # By channel group
+    ch_resp = client.run_report(RunReportRequest(
         property=prop,
         date_ranges=[DateRange(start_date=start, end_date=end)],
         dimensions=[Dimension(name="sessionDefaultChannelGroup")],
         metrics=[Metric(name="eventCount")],
-        dimension_filter=FilterExpression(filter=Filter(
-            field_name="eventName",
-            string_filter=Filter.StringFilter(
-                value="gform_submission",
-                match_type=Filter.StringFilter.MatchType.EXACT,
-            )
-        )),
+        dimension_filter=gform_filter,
         order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="eventCount"), desc=True)],
         limit=20,
     ))
     channels = [
         {"channel": r.dimension_values[0].value, "count": int(r.metric_values[0].value)}
-        for r in resp.rows
+        for r in ch_resp.rows
         if int(r.metric_values[0].value) > 0
     ]
-    return {"total": sum(c["count"] for c in channels), "channels": channels}
+
+    # By date (daily trend)
+    day_resp = client.run_report(RunReportRequest(
+        property=prop,
+        date_ranges=[DateRange(start_date=start, end_date=end)],
+        dimensions=[Dimension(name="date")],
+        metrics=[Metric(name="eventCount")],
+        dimension_filter=gform_filter,
+        order_bys=[OrderBy(dimension=OrderBy.DimensionOrderBy(dimension_name="date"))],
+        limit=400,
+    ))
+    daily = [
+        {"date": r.dimension_values[0].value, "count": int(r.metric_values[0].value)}
+        for r in day_resp.rows
+    ]
+
+    return {
+        "total":    sum(c["count"] for c in channels),
+        "channels": channels,
+        "daily":    daily,
+    }
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -569,6 +594,33 @@ if ext_ok and ext_data:
         else:
             st.info("No conversion data available. Configure conversion events in GA4.", icon="ℹ️")
 
+    st.markdown("<br>", unsafe_allow_html=True)
+
+
+# ── Row 4b: Form Submissions Over Time ───────────────────────────────────────
+if ga4_ok and form_data.get("daily"):
+    fs_daily = form_data["daily"]
+    fs_df = pd.DataFrame(fs_daily)
+    fs_df["date"] = pd.to_datetime(fs_df["date"], format="%Y%m%d")
+    fig_fs = go.Figure()
+    fig_fs.add_trace(go.Scatter(
+        x=fs_df["date"], y=fs_df["count"],
+        name="Form Submissions",
+        line=dict(color=theme["accent"], width=2.5),
+        fill="tozeroy", fillcolor=theme["fill_alpha"],
+        mode="lines+markers", marker=dict(size=5, color=theme["accent"]),
+        hovertemplate="%{x|%b %d}: %{y} submission(s)<extra></extra>",
+    ))
+    layout_fs = chart_layout("Form Submissions Over Time", "Date", "Form Submissions")
+    fig_fs.update_layout(**layout_fs, height=260)
+    st.plotly_chart(fig_fs, use_container_width=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+elif ga4_ok:
+    st.markdown(
+        f'<p style="color:{theme["text_secondary"]};font-size:0.9rem;'
+        f'text-align:center;padding:1.5rem 0;">No form submissions recorded in this period</p>',
+        unsafe_allow_html=True,
+    )
     st.markdown("<br>", unsafe_allow_html=True)
 
 
