@@ -3,6 +3,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from utils.sidebar import render_sidebar
 from utils.theme import get_theme, apply_theme_css, kpi_card, chart_layout, pct_delta
 
+def _rgba(hex_color: str, alpha: float = 0.45) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
 import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
@@ -172,6 +177,29 @@ if not daily_df.empty:
                              name="Impressions", marker_color=theme["bar_fill"], yaxis="y2"))
         fig.add_trace(go.Scatter(x=daily_df["date"], y=daily_df["clicks"],
                                  name="Clicks", line=dict(color=COLORS[0], width=2.5)))
+
+        # Prior period — align by day-of-period so the curves overlap visually
+        if compare_enabled and prior_data and prior_data.get("daily"):
+            prior_daily_df = pd.DataFrame(prior_data["daily"])
+            prior_daily_df["date"] = pd.to_datetime(prior_daily_df["date"])
+            prior_daily_df = prior_daily_df.sort_values("date").reset_index(drop=True)
+            current_dates  = daily_df.sort_values("date")["date"].reset_index(drop=True)
+            n = min(len(current_dates), len(prior_daily_df))
+            fig.add_trace(go.Scatter(
+                x=current_dates[:n],
+                y=prior_daily_df["clicks"][:n],
+                name="Prior Clicks",
+                line=dict(color=COLORS[0], width=1.5, dash="dash"),
+                opacity=0.55,
+            ))
+            fig.add_trace(go.Bar(
+                x=current_dates[:n],
+                y=prior_daily_df["impressions"][:n],
+                name="Prior Impressions",
+                marker_color=_rgba(COLORS[0], 0.15),
+                yaxis="y2",
+            ))
+
         layout_args = chart_layout("Clicks vs Impressions", "Date")
         layout_args["barmode"] = "overlay"
         layout_args["yaxis"]  = dict(title="Clicks", gridcolor=theme["chart_grid"],

@@ -3,6 +3,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from utils.sidebar import render_sidebar
 from utils.theme import get_theme, apply_theme_css, kpi_card, chart_layout, pct_delta, fmt_duration, CHANNEL_COLORS, channel_color
 
+def _rgba(hex_color: str, alpha: float = 0.40) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
@@ -344,17 +349,42 @@ if not events_df.empty:
     col_ev_l, col_ev_r = st.columns(2)
     with col_ev_l:
         top15_ev = events_df.head(15)
-        fig_ev = go.Figure(go.Bar(
-            x=top15_ev["count"],
-            y=top15_ev["event"],
-            orientation="h",
-            marker_color=COLORS[0],
-            text=top15_ev["count"].apply(lambda v: f"{v:,}"),
+        cur_ev_map  = dict(zip(top15_ev["event"], top15_ev["count"]))
+        prior_ev_df = pd.DataFrame(prior_data["events"]) if prior_data and prior_data.get("events") else pd.DataFrame()
+        prior_ev_map = dict(zip(prior_ev_df["event"], prior_ev_df["count"])) if not prior_ev_df.empty else {}
+
+        def _ev_label(ev):
+            cur = cur_ev_map.get(ev, 0)
+            pri = prior_ev_map.get(ev, 0)
+            if compare_enabled and pri:
+                pct = (cur - pri) / pri * 100
+                arrow = "↑" if pct >= 0 else "↓"
+                return f"{cur:,}  {arrow}{abs(pct):.0f}%"
+            return f"{cur:,}"
+
+        fig_ev = go.Figure()
+        fig_ev.add_trace(go.Bar(
+            x=top15_ev["count"], y=top15_ev["event"], orientation="h",
+            name="Current", marker_color=COLORS[0],
+            text=[_ev_label(e) for e in top15_ev["event"]],
             textposition="outside", textfont=dict(color=theme["chart_font"]),
         ))
-        layout_ev = chart_layout("Top Events by Count")
-        layout_ev["yaxis"]["autorange"] = "reversed"
-        fig_ev.update_layout(**layout_ev, height=max(300, len(top15_ev) * 28))
+        if compare_enabled and prior_ev_map:
+            prior_counts = [prior_ev_map.get(e, 0) for e in top15_ev["event"]]
+            fig_ev.add_trace(go.Bar(
+                x=prior_counts, y=top15_ev["event"], orientation="h",
+                name="Prior", marker_color=_rgba(COLORS[0], 0.40),
+                text=[f"{v:,}" for v in prior_counts],
+                textposition="outside", textfont=dict(color=theme["chart_font"]),
+            ))
+            layout_ev = chart_layout("Top Events by Count")
+            layout_ev["yaxis"]["autorange"] = "reversed"
+            layout_ev["barmode"] = "group"
+            fig_ev.update_layout(**layout_ev, height=max(300, len(top15_ev) * 42))
+        else:
+            layout_ev = chart_layout("Top Events by Count")
+            layout_ev["yaxis"]["autorange"] = "reversed"
+            fig_ev.update_layout(**layout_ev, height=max(300, len(top15_ev) * 28))
         st.plotly_chart(fig_ev, use_container_width=True)
 
     with col_ev_r:

@@ -12,6 +12,13 @@ from utils.theme import (
     CHANNEL_COLORS, channel_color,
 )
 
+def _rgba(hex_color: str, alpha: float = 0.40) -> str:
+    """Convert a #RRGGBB hex color to rgba(r,g,b,alpha)."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
 st.set_page_config(
     page_title="Goodman Financial — Dashboard",
     page_icon="📊",
@@ -560,15 +567,52 @@ col_left, col_right = st.columns(2)
 
 with col_left:
     if ga4_ok and ga4_data and ga4_data.get("channels"):
-        ch_df = pd.DataFrame(ga4_data["channels"]).sort_values("sessions")
-        bar_colors = [channel_color(c) for c in ch_df["channel"]]
-        fig = go.Figure(go.Bar(
-            x=ch_df["sessions"], y=ch_df["channel"], orientation="h",
-            marker_color=bar_colors,
-            text=ch_df["sessions"].apply(lambda v: f"{v:,}"),
-            textposition="outside", textfont=dict(color=theme["chart_font"]),
-        ))
-        fig.update_layout(**chart_layout("Sessions by Channel", compact=True), height=280)
+        cur_ch = ga4_data["channels"]
+        cur_map = {r["channel"]: r["sessions"] for r in cur_ch}
+
+        if compare_enabled and p_ga4 and p_ga4.get("channels"):
+            pri_map = {r["channel"]: r["sessions"] for r in p_ga4["channels"]}
+            all_ch  = sorted(
+                cur_map.keys() | pri_map.keys(),
+                key=lambda c: -cur_map.get(c, 0),
+            )
+            cur_vals = [cur_map.get(c, 0) for c in all_ch]
+            pri_vals = [pri_map.get(c, 0) for c in all_ch]
+
+            def _delta_label(cur, pri):
+                if not pri: return f"{cur:,}"
+                pct = (cur - pri) / pri * 100
+                arrow = "↑" if pct >= 0 else "↓"
+                return f"{cur:,}  {arrow}{abs(pct):.0f}%"
+
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=cur_vals, y=all_ch, orientation="h",
+                name="Current",
+                marker_color=[channel_color(c) for c in all_ch],
+                text=[_delta_label(cur_map.get(c, 0), pri_map.get(c, 0)) for c in all_ch],
+                textposition="outside", textfont=dict(color=theme["chart_font"]),
+            ))
+            fig.add_trace(go.Bar(
+                x=pri_vals, y=all_ch, orientation="h",
+                name="Prior",
+                marker_color=[_rgba(channel_color(c), 0.40) for c in all_ch],
+                text=[f"{v:,}" for v in pri_vals],
+                textposition="outside", textfont=dict(color=theme["chart_font"]),
+            ))
+            layout_ch = chart_layout("Sessions by Channel", compact=True)
+            layout_ch["barmode"] = "group"
+            fig.update_layout(**layout_ch, height=max(280, len(all_ch) * 52 + 60))
+        else:
+            ch_df = pd.DataFrame(cur_ch).sort_values("sessions")
+            fig = go.Figure(go.Bar(
+                x=ch_df["sessions"], y=ch_df["channel"], orientation="h",
+                marker_color=[channel_color(c) for c in ch_df["channel"]],
+                text=ch_df["sessions"].apply(lambda v: f"{v:,}"),
+                textposition="outside", textfont=dict(color=theme["chart_font"]),
+            ))
+            fig.update_layout(**chart_layout("Sessions by Channel", compact=True), height=280)
+
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.markdown(kpi_card("Sessions by Channel", "GA4 not connected", muted=True),
@@ -586,25 +630,29 @@ with col_right:
         bar_colors = [channel_color(c) for c in all_channels]
 
         fig2 = go.Figure()
+        def _fs_label(c):
+            cur = cur_map.get(c, 0)
+            pri = pri_map.get(c, 0) if compare_enabled else 0
+            if compare_enabled and pri:
+                pct = (cur - pri) / pri * 100
+                arrow = "↑" if pct >= 0 else "↓"
+                return f"{cur}  {arrow}{abs(pct):.0f}%"
+            return str(cur)
+
         fig2.add_trace(go.Bar(
             x=[cur_map.get(c, 0) for c in all_channels],
             y=all_channels, orientation="h",
             name="Current Period",
             marker_color=bar_colors,
-            text=[cur_map.get(c, 0) for c in all_channels],
+            text=[_fs_label(c) for c in all_channels],
             textposition="outside", textfont=dict(color=theme["chart_font"]),
         ))
         if compare_enabled and p_form_data.get("channels"):
-            # Lighter version of same colors for prior period
-            def _lighten(hex_color, alpha=0.45):
-                h = hex_color.lstrip("#")
-                r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-                return f"rgba({r},{g},{b},{alpha})"
             fig2.add_trace(go.Bar(
                 x=[pri_map.get(c, 0) for c in all_channels],
                 y=all_channels, orientation="h",
                 name="Prior Period",
-                marker_color=[_lighten(channel_color(c)) for c in all_channels],
+                marker_color=[_rgba(channel_color(c), 0.40) for c in all_channels],
                 text=[pri_map.get(c, 0) for c in all_channels],
                 textposition="outside", textfont=dict(color=theme["chart_font"]),
             ))
@@ -684,11 +732,6 @@ if ga4_ok:
         y_max = int(pivot.sum(axis=1).max()) if not pivot.empty else 1
 
         fig_fs = go.Figure()
-        def _hex_rgba(hex_color, alpha=0.35):
-            h = hex_color.lstrip("#")
-            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-            return f"rgba({r},{g},{b},{alpha})"
-
         for i, ch in enumerate(channel_order):
             color = channel_color(ch, fallback_index=i)
             fig_fs.add_trace(go.Scatter(
@@ -697,7 +740,7 @@ if ga4_ok:
                 mode="lines",
                 line=dict(color=color, width=1.5),
                 fill="tonexty" if i > 0 else "tozeroy",
-                fillcolor=_hex_rgba(color),
+                fillcolor=_rgba(color, 0.35),
                 stackgroup="one",
                 hovertemplate=f"<b>{ch}</b><br>%{{x|%b %d}}: %{{y}} submission(s)<extra></extra>",
             ))
