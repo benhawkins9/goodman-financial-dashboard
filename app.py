@@ -74,9 +74,11 @@ def check_password():
             <h1 style="color:{t['text_primary']};margin:0;font-size:1.8rem;">Goodman Financial</h1>
             <p style="color:{t['text_secondary']};margin:0.4rem 0 2rem;">Marketing Analytics Dashboard</p>
         </div>""", unsafe_allow_html=True)
-        pwd = st.text_input("Password", type="password", placeholder="Enter your password",
-                            label_visibility="collapsed")
-        if st.button("Sign In", use_container_width=True, type="primary"):
+        with st.form("login_form"):
+            pwd = st.text_input("Password", type="password", placeholder="Enter your password",
+                                label_visibility="collapsed")
+            submitted = st.form_submit_button("Sign In", use_container_width=True)
+        if submitted:
             if pwd == st.secrets.get("APP_PASSWORD", ""):
                 st.session_state.authenticated = True
                 st.rerun()
@@ -273,10 +275,15 @@ def fetch_ga4_extended(start, end):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_ga4_form_submissions(start, end):
-    """Return eventCount for gform_submission in the given date range."""
+    """Return gform_submission counts broken down by channel group.
+
+    Returns a dict with:
+      "total"    – int, sum across all channels
+      "channels" – list of {"channel": str, "count": int}, sorted desc
+    """
     from google.analytics.data_v1beta import BetaAnalyticsDataClient
     from google.analytics.data_v1beta.types import (
-        RunReportRequest, DateRange, Dimension, Metric,
+        RunReportRequest, DateRange, Dimension, Metric, OrderBy,
         FilterExpression, Filter,
     )
     from google.oauth2 import service_account
@@ -287,7 +294,7 @@ def fetch_ga4_form_submissions(start, end):
     resp = client.run_report(RunReportRequest(
         property=prop,
         date_ranges=[DateRange(start_date=start, end_date=end)],
-        dimensions=[Dimension(name="eventName")],
+        dimensions=[Dimension(name="sessionDefaultChannelGroup")],
         metrics=[Metric(name="eventCount")],
         dimension_filter=FilterExpression(filter=Filter(
             field_name="eventName",
@@ -296,11 +303,15 @@ def fetch_ga4_form_submissions(start, end):
                 match_type=Filter.StringFilter.MatchType.EXACT,
             )
         )),
-        limit=1,
+        order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="eventCount"), desc=True)],
+        limit=20,
     ))
-    if resp.rows:
-        return int(resp.rows[0].metric_values[0].value)
-    return 0
+    channels = [
+        {"channel": r.dimension_values[0].value, "count": int(r.metric_values[0].value)}
+        for r in resp.rows
+        if int(r.metric_values[0].value) > 0
+    ]
+    return {"total": sum(c["count"] for c in channels), "channels": channels}
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -369,7 +380,7 @@ ext_data, ext_ok             = None, False
 gsc_data, gsc_ok, gsc_err    = None, False, ""
 meta_data, meta_ok, meta_err = None, False, ""
 li_data,  li_ok,  li_err     = None, False, ""
-form_leads                   = 0
+form_data                    = {"total": 0, "channels": []}
 
 with st.spinner("Loading data from all channels…"):
     try: ga4_data  = fetch_ga4_summary(start_str, end_str);  ga4_ok  = True
@@ -377,8 +388,8 @@ with st.spinner("Loading data from all channels…"):
     try: ext_data  = fetch_ga4_extended(start_str, end_str); ext_ok  = True
     except Exception: pass
     if ga4_ok:
-        try: form_leads = fetch_ga4_form_submissions(start_str, end_str)
-        except Exception: form_leads = 0
+        try: form_data = fetch_ga4_form_submissions(start_str, end_str)
+        except Exception: form_data = {"total": 0, "channels": []}
     try: gsc_data  = fetch_gsc_summary(start_str, end_str);  gsc_ok  = True
     except Exception as e: gsc_err  = str(e)
     try: meta_data = fetch_meta_summary(start_str, end_str); meta_ok = True
@@ -388,13 +399,13 @@ with st.spinner("Loading data from all channels…"):
 
 # ── Fetch prior period ────────────────────────────────────────────────────────
 p_ga4 = p_gsc = p_meta = p_li = None
-p_form_leads = 0
+p_form_data = {"total": 0, "channels": []}
 if compare_enabled and prior_start_str:
     with st.spinner("Loading prior period…"):
         try: p_ga4  = fetch_ga4_summary(prior_start_str, prior_end_str)
         except: pass
-        try: p_form_leads = fetch_ga4_form_submissions(prior_start_str, prior_end_str)
-        except: p_form_leads = 0
+        try: p_form_data = fetch_ga4_form_submissions(prior_start_str, prior_end_str)
+        except: p_form_data = {"total": 0, "channels": []}
         try: p_gsc  = fetch_gsc_summary(prior_start_str, prior_end_str)
         except: pass
         try: p_meta = fetch_meta_summary(prior_start_str, prior_end_str)
@@ -430,6 +441,7 @@ fb_spend = meta_data["spend"]   if meta_ok and meta_data else 0.0
 fb_leads = meta_data["leads"]   if meta_ok and meta_data else 0
 li_spend = float(li_data.get("spend", 0)) if li_ok and li_data else 0.0
 li_leads = int(li_data.get("leads", 0))   if li_ok and li_data else 0
+form_leads         = form_data["total"]
 total_spend        = fb_spend + li_spend
 total_conversions  = fb_leads + li_leads + form_leads   # paid leads + GA4 form submissions
 paid_leads         = fb_leads + li_leads                # for CPL (spend-based), exclude organic forms
@@ -441,7 +453,7 @@ p_total_spend = p_fb_spend + p_li_spend
 p_fb_leads    = int(p_meta.get("leads", 0))   if compare_enabled and p_meta else 0
 p_li_leads    = int(p_li.get("leads", 0))     if compare_enabled and p_li  else 0
 p_paid_leads  = p_fb_leads + p_li_leads
-p_total_conv  = p_paid_leads + p_form_leads
+p_total_conv  = p_paid_leads + p_form_data["total"]
 p_cpl         = (p_total_spend / p_paid_leads) if compare_enabled and p_paid_leads > 0 else None
 
 d_sessions = pct_delta(total_sessions, p_ga4["sessions"]) if compare_enabled and p_ga4 else None
@@ -497,26 +509,24 @@ with col_left:
                     unsafe_allow_html=True)
 
 with col_right:
-    lead_labels, lead_vals, lead_colors = [], [], []
-    if ga4_ok and form_leads > 0:
-        lead_labels.append("Form Submissions (GA4)"); lead_vals.append(form_leads)
-        lead_colors.append(theme["colors"][2])
-    if meta_ok and fb_leads > 0:
-        lead_labels.append("Facebook Ads"); lead_vals.append(fb_leads)
-        lead_colors.append(theme["colors"][0])
-    if li_ok  and li_leads > 0:
-        lead_labels.append("LinkedIn"); lead_vals.append(li_leads)
-        lead_colors.append(theme["colors"][1])
-    if lead_labels:
+    form_ch = form_data.get("channels", [])
+    if ga4_ok and form_ch:
+        fs_df = pd.DataFrame(form_ch).sort_values("count")
+        n = len(fs_df)
+        bar_colors = [theme["colors"][i % len(theme["colors"])] for i in range(n)]
         fig2 = go.Figure(go.Bar(
-            x=lead_vals, y=lead_labels, orientation="h",
-            marker_color=lead_colors,
-            text=lead_vals, textposition="outside", textfont=dict(color=theme["chart_font"]),
+            x=fs_df["count"], y=fs_df["channel"], orientation="h",
+            marker_color=bar_colors,
+            text=fs_df["count"], textposition="outside",
+            textfont=dict(color=theme["chart_font"]),
         ))
-        fig2.update_layout(**chart_layout("Conversions by Channel", compact=True), height=280)
+        fig2.update_layout(
+            **chart_layout("Form Submissions by Channel", compact=True),
+            height=max(200, n * 42 + 60),
+        )
         st.plotly_chart(fig2, use_container_width=True)
     else:
-        st.markdown(kpi_card("Conversions by Channel", "No conversion data yet", muted=True),
+        st.markdown(kpi_card("Form Submissions by Channel", "No form data yet", muted=True),
                     unsafe_allow_html=True)
 
 
