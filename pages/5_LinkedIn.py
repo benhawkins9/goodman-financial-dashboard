@@ -120,6 +120,7 @@ def fetch_sheet(sheet_id: str, credentials_json: str) -> pd.DataFrame:
     from google.oauth2.service_account import Credentials
 
     creds_info = json.loads(credentials_json)
+    creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
     creds = Credentials.from_service_account_info(
         creds_info,
         scopes=[

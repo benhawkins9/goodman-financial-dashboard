@@ -211,17 +211,32 @@ start_str = start_date.strftime("%Y-%m-%d")
 end_str = end_date.strftime("%Y-%m-%d")
 
 try:
-    access_token = st.secrets["META_ACCESS_TOKEN"]
-    account_id = st.secrets["META_AD_ACCOUNT_ID"]
+    access_token = st.secrets["META_ACCESS_TOKEN"].strip()
+    account_id = st.secrets["META_AD_ACCOUNT_ID"].strip()
 except KeyError as e:
     st.error(f"Missing secret: {e}. Add META_ACCESS_TOKEN and META_AD_ACCOUNT_ID to secrets.toml.")
     st.stop()
+
+with st.expander("🔍 Debug — credential check (expand to verify)", expanded=False):
+    st.markdown(f"**Ad Account ID:** `{account_id}`")
+    st.markdown(f"**Access Token (first 10 chars):** `{access_token[:10]}…` &nbsp; length: `{len(access_token)}`")
+    if len(access_token) < 50:
+        st.warning("Token looks short — it may be truncated in secrets.toml. Tokens are typically 150–250 characters.")
 
 with st.spinner("Fetching Meta Ads data…"):
     try:
         data = fetch_meta(start_str, end_str, account_id, access_token)
     except Exception as e:
         st.error(f"Could not load Meta Ads data: {e}")
+        st.markdown("**Full error details:**")
+        st.code(str(e), language="text")
+        st.markdown("**Checklist:**")
+        st.markdown(
+            "- Confirm `META_ACCESS_TOKEN` is a **System User** token (not a short-lived user token)\n"
+            "- Token must have `ads_read` and `ads_management` permissions\n"
+            "- `META_AD_ACCOUNT_ID` must be in the format `act_XXXXXXXXXX`\n"
+            "- Token must not be expired — regenerate in Meta Business Manager if needed"
+        )
         st.stop()
 
 # ── KPI Cards ──
