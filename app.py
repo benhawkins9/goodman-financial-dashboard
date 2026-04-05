@@ -187,7 +187,7 @@ def fetch_ga4_extended(start, end):
     from google.analytics.data_v1beta import BetaAnalyticsDataClient
     from google.analytics.data_v1beta.types import (
         RunReportRequest, DateRange, Dimension, Metric, OrderBy,
-        FilterExpression, Filter, FilterExpressionList,
+        FilterExpression, Filter,
     )
     from google.oauth2 import service_account
 
@@ -264,38 +264,11 @@ def fetch_ga4_extended(start, end):
         for r in rr.rows
     ]
 
-    # 5. Content pages (/blog/, /resources/, /insights/)
-    content_filter = FilterExpression(
-        or_group=FilterExpressionList(expressions=[
-            FilterExpression(filter=Filter(
-                field_name="pagePath",
-                string_filter=Filter.StringFilter(
-                    value=path,
-                    match_type=Filter.StringFilter.MatchType.CONTAINS,
-                )
-            ))
-            for path in ("/blog/", "/resources/", "/insights/")
-        ])
-    )
-    cont_r = run(["pagePath"],
-                 ["screenPageViews", "userEngagementDuration", "sessions"],
-                 [OrderBy(metric=OrderBy.MetricOrderBy(metric_name="screenPageViews"), desc=True)],
-                 10, dim_filter=content_filter)
-    content_pages = [
-        {"page":             r.dimension_values[0].value,
-         "views":            int(r.metric_values[0].value),
-         "avg_time_on_page": float(r.metric_values[1].value) /
-                              max(int(r.metric_values[0].value), 1),
-         "sessions":         int(r.metric_values[2].value)}
-        for r in cont_r.rows
-    ]
-
     return {
         "quality":          quality,
         "engagement_trend": engagement_trend,
         "converting_pages": converting_pages,
         "referral_sources": referral_sources,
-        "content_pages":    content_pages,
     }
 
 
@@ -370,6 +343,71 @@ def fetch_ga4_form_submissions(start, end):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def fetch_ga4_conversion_rate_by_source(start, end):
+    """Return top 10 traffic sources by conversion rate (gform_submission / sessions).
+
+    Only sources with >= 10 sessions are included to avoid misleading 100% rates.
+    Returns list of dicts: {source, sessions, conversions, conv_rate}.
+    """
+    from google.analytics.data_v1beta import BetaAnalyticsDataClient
+    from google.analytics.data_v1beta.types import (
+        RunReportRequest, DateRange, Dimension, Metric, OrderBy,
+        FilterExpression, Filter,
+    )
+    from google.oauth2 import service_account
+    creds = service_account.Credentials.from_service_account_info(
+        _build_creds_dict(), scopes=["https://www.googleapis.com/auth/analytics.readonly"])
+    client = BetaAnalyticsDataClient(credentials=creds)
+    prop = f"properties/{st.secrets['GA4_PROPERTY_ID']}"
+
+    # Call 1: sessions by source
+    sess_resp = client.run_report(RunReportRequest(
+        property=prop,
+        date_ranges=[DateRange(start_date=start, end_date=end)],
+        dimensions=[Dimension(name="sessionSource")],
+        metrics=[Metric(name="sessions")],
+        order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="sessions"), desc=True)],
+        limit=100,
+    ))
+    sessions_map = {r.dimension_values[0].value: int(r.metric_values[0].value)
+                    for r in sess_resp.rows}
+
+    # Call 2: gform_submission events by source
+    gform_filter = FilterExpression(filter=Filter(
+        field_name="eventName",
+        string_filter=Filter.StringFilter(
+            value="gform_submission",
+            match_type=Filter.StringFilter.MatchType.EXACT,
+        )
+    ))
+    conv_resp = client.run_report(RunReportRequest(
+        property=prop,
+        date_ranges=[DateRange(start_date=start, end_date=end)],
+        dimensions=[Dimension(name="sessionSource")],
+        metrics=[Metric(name="eventCount")],
+        dimension_filter=gform_filter,
+        order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="eventCount"), desc=True)],
+        limit=100,
+    ))
+    conv_map = {r.dimension_values[0].value: int(r.metric_values[0].value)
+                for r in conv_resp.rows}
+
+    rows = []
+    for source, sess in sessions_map.items():
+        if sess < 10:
+            continue
+        convs = conv_map.get(source, 0)
+        rows.append({
+            "source":      source,
+            "sessions":    sess,
+            "conversions": convs,
+            "conv_rate":   convs / sess * 100,
+        })
+    rows.sort(key=lambda r: -r["conv_rate"])
+    return rows[:10]
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_gsc_summary(start, end):
     from googleapiclient.discovery import build
     from google.oauth2 import service_account
@@ -436,6 +474,7 @@ gsc_data, gsc_ok, gsc_err    = None, False, ""
 meta_data, meta_ok, meta_err = None, False, ""
 li_data,  li_ok,  li_err     = None, False, ""
 form_data                    = {"total": 0, "channels": []}
+conv_rate_data               = []
 
 with st.spinner("Loading data from all channels…"):
     try: ga4_data  = fetch_ga4_summary(start_str, end_str);  ga4_ok  = True
@@ -445,6 +484,8 @@ with st.spinner("Loading data from all channels…"):
     if ga4_ok:
         try: form_data = fetch_ga4_form_submissions(start_str, end_str)
         except Exception: form_data = {"total": 0, "channels": []}
+        try: conv_rate_data = fetch_ga4_conversion_rate_by_source(start_str, end_str)
+        except Exception: conv_rate_data = []
     try: gsc_data  = fetch_gsc_summary(start_str, end_str);  gsc_ok  = True
     except Exception as e: gsc_err  = str(e)
     try: meta_data = fetch_meta_summary(start_str, end_str); meta_ok = True
@@ -454,8 +495,9 @@ with st.spinner("Loading data from all channels…"):
 
 # ── Fetch prior period ────────────────────────────────────────────────────────
 p_ga4 = p_gsc = p_meta = p_li = None
-p_ext_data  = None
-p_form_data = {"total": 0, "channels": [], "daily_by_channel": []}
+p_ext_data     = None
+p_form_data    = {"total": 0, "channels": [], "daily_by_channel": []}
+p_conv_rate_data = []
 if compare_enabled and prior_start_str:
     with st.spinner("Loading prior period…"):
         try: p_ga4      = fetch_ga4_summary(prior_start_str, prior_end_str)
@@ -464,6 +506,8 @@ if compare_enabled and prior_start_str:
         except: pass
         try: p_form_data = fetch_ga4_form_submissions(prior_start_str, prior_end_str)
         except: p_form_data = {"total": 0, "channels": [], "daily_by_channel": []}
+        try: p_conv_rate_data = fetch_ga4_conversion_rate_by_source(prior_start_str, prior_end_str)
+        except: p_conv_rate_data = []
         try: p_gsc  = fetch_gsc_summary(prior_start_str, prior_end_str)
         except: pass
         try: p_meta = fetch_meta_summary(prior_start_str, prior_end_str)
@@ -673,6 +717,114 @@ with col_right:
                     unsafe_allow_html=True)
 
 
+# ── Row 3b: Conversion Rate by Source ────────────────────────────────────────
+if ga4_ok and conv_rate_data:
+    st.markdown(
+        f'<p style="color:{theme["text_secondary"]};font-size:11px;font-weight:500;'
+        f'text-transform:uppercase;letter-spacing:0.05em;margin:0.5rem 0 0.75rem;">'
+        f'Conversion Rate by Source</p>',
+        unsafe_allow_html=True,
+    )
+
+    _SOURCE_DEFAULT = "#5BB89A"
+
+    def _source_color(source: str) -> str:
+        return CHANNEL_COLORS.get(source, _SOURCE_DEFAULT)
+
+    cur_cr_map = {r["source"]: r for r in conv_rate_data}
+
+    if compare_enabled and p_conv_rate_data:
+        pri_cr_map = {r["source"]: r for r in p_conv_rate_data}
+        # Union of sources, sorted ascending by current conv_rate so highest is at top
+        all_sources = sorted(
+            cur_cr_map.keys() | pri_cr_map.keys(),
+            key=lambda s: cur_cr_map[s]["conv_rate"] if s in cur_cr_map else 0,
+        )
+        cur_rates = [cur_cr_map[s]["conv_rate"] if s in cur_cr_map else 0 for s in all_sources]
+        pri_rates = [pri_cr_map[s]["conv_rate"] if s in pri_cr_map else 0 for s in all_sources]
+        cur_sess  = [cur_cr_map[s]["sessions"]  if s in cur_cr_map else 0 for s in all_sources]
+        cur_convs = [cur_cr_map[s]["conversions"] if s in cur_cr_map else 0 for s in all_sources]
+        pri_sess  = [pri_cr_map[s]["sessions"]  if s in pri_cr_map else 0 for s in all_sources]
+        pri_convs = [pri_cr_map[s]["conversions"] if s in pri_cr_map else 0 for s in all_sources]
+
+        def _cr_delta_color(cur_r, pri_r):
+            if not pri_r: return theme["chart_font"]
+            return theme["accent"] if cur_r >= pri_r else theme["negative"]
+
+        def _cr_delta_label(cur_r, pri_r):
+            if not pri_r: return f"{cur_r:.1f}%"
+            pct = (cur_r - pri_r) / pri_r * 100
+            arrow = "↑" if pct >= 0 else "↓"
+            return f"{cur_r:.1f}%  {arrow}{abs(pct):.0f}%"
+
+        fig_cr = go.Figure()
+        fig_cr.add_trace(go.Bar(
+            x=cur_rates, y=all_sources, orientation="h",
+            name="Current",
+            marker_color=[_source_color(s) for s in all_sources],
+            width=0.6,
+            text=[_cr_delta_label(cur_rates[i], pri_rates[i]) for i in range(len(all_sources))],
+            textposition="outside",
+            textfont=dict(color=[_cr_delta_color(cur_rates[i], pri_rates[i]) for i in range(len(all_sources))]),
+            customdata=list(zip(cur_sess, cur_convs)),
+            hovertemplate=(
+                "Source: %{y}<br>"
+                "Conv Rate: %{x:.2f}%<br>"
+                "Sessions: %{customdata[0]:,}<br>"
+                "Form Submissions: %{customdata[1]}<extra></extra>"
+            ),
+        ))
+        fig_cr.add_trace(go.Bar(
+            x=pri_rates, y=all_sources, orientation="h",
+            name="Prior",
+            marker_color=[_rgba(_source_color(s), 0.35) for s in all_sources],
+            width=0.4,
+            text=[f"{r:.1f}%" for r in pri_rates],
+            textposition="outside", textfont=dict(color=theme["chart_font"]),
+            customdata=list(zip(pri_sess, pri_convs)),
+            hovertemplate=(
+                "Source: %{y}<br>"
+                "Conv Rate: %{x:.2f}%<br>"
+                "Sessions: %{customdata[0]:,}<br>"
+                "Form Submissions: %{customdata[1]}<extra></extra>"
+            ),
+        ))
+        layout_cr = chart_layout("Conversion Rate by Traffic Source", xaxis_title="Conversion Rate (%)", compact=True)
+        layout_cr["barmode"] = "group"
+        fig_cr.update_layout(**layout_cr, height=max(300, len(all_sources) * 80))
+    else:
+        # Single-period version
+        sources = [r["source"]      for r in conv_rate_data]
+        rates   = [r["conv_rate"]   for r in conv_rate_data]
+        sess    = [r["sessions"]    for r in conv_rate_data]
+        convs   = [r["conversions"] for r in conv_rate_data]
+        # Sort ascending so highest rate is at top
+        combined = sorted(zip(sources, rates, sess, convs), key=lambda x: x[1])
+        sources, rates, sess, convs = zip(*combined) if combined else ([], [], [], [])
+
+        fig_cr = go.Figure(go.Bar(
+            x=list(rates), y=list(sources), orientation="h",
+            marker_color=[_source_color(s) for s in sources],
+            text=[f"{r:.1f}%" for r in rates],
+            textposition="outside", textfont=dict(color=theme["chart_font"]),
+            customdata=list(zip(sess, convs)),
+            hovertemplate=(
+                "Source: %{y}<br>"
+                "Conv Rate: %{x:.2f}%<br>"
+                "Sessions: %{customdata[0]:,}<br>"
+                "Form Submissions: %{customdata[1]}<extra></extra>"
+            ),
+        ))
+        fig_cr.update_layout(
+            **chart_layout("Conversion Rate by Traffic Source", xaxis_title="Conversion Rate (%)", compact=True),
+            height=max(280, len(sources) * 44 + 60),
+        )
+
+    st.plotly_chart(fig_cr, use_container_width=True)
+    st.caption("Sources with fewer than 10 sessions excluded")
+    st.markdown("<br>", unsafe_allow_html=True)
+
+
 # ── Row 4: Engagement Rate Trend + Top Converting Pages ──────────────────────
 if ext_ok and ext_data:
     col_trend, col_convert = st.columns(2)
@@ -822,20 +974,6 @@ if ext_ok and ext_data and ext_data.get("referral_sources"):
             rs_df.rename(columns={
                 "source": "Source", "sessions": "Sessions",
                 "engaged_sessions": "Engaged Sessions", "engagement_rate": "Engagement Rate"
-            }),
-            use_container_width=True, hide_index=True,
-        )
-
-
-# ── Row 8: Content Performance expander ──────────────────────────────────────
-if ext_ok and ext_data and ext_data.get("content_pages"):
-    with st.expander("Content Performance (/blog/, /resources/, /insights/)", expanded=True):
-        cont_df = pd.DataFrame(ext_data["content_pages"])
-        cont_df["avg_time_on_page"] = cont_df["avg_time_on_page"].apply(fmt_duration)
-        st.dataframe(
-            cont_df.rename(columns={
-                "page": "Page", "views": "Views",
-                "avg_time_on_page": "Avg Time on Page", "sessions": "Sessions"
             }),
             use_container_width=True, hide_index=True,
         )
