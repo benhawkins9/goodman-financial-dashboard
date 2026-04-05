@@ -2,7 +2,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import pandas as pd
-import json
+
 
 # ── Page config (must be first Streamlit call) ──────────────────────────────
 st.set_page_config(
@@ -200,10 +200,21 @@ def fetch_ga4_summary(start: str, end: str) -> dict:
     from google.analytics.data_v1beta.types import RunReportRequest, DateRange, Dimension, Metric
     from google.oauth2 import service_account
 
-    creds_info = json.loads(st.secrets["GA4_CREDENTIALS"])
-    creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
+    creds_dict = {
+        "type": "service_account",
+        "project_id": st.secrets["GA4_PROJECT_ID"],
+        "private_key_id": st.secrets["GA4_PRIVATE_KEY_ID"],
+        "private_key": st.secrets["GA4_PRIVATE_KEY"].replace("\\n", "\n"),
+        "client_email": st.secrets["GA4_CLIENT_EMAIL"],
+        "client_id": st.secrets["GA4_CLIENT_ID"],
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_x509_cert_url": st.secrets["GA4_CLIENT_X509_CERT_URL"],
+        "universe_domain": "googleapis.com",
+    }
     credentials = service_account.Credentials.from_service_account_info(
-        creds_info,
+        creds_dict,
         scopes=["https://www.googleapis.com/auth/analytics.readonly"],
     )
     client = BetaAnalyticsDataClient(credentials=credentials)
@@ -230,10 +241,21 @@ def fetch_gsc_summary(start: str, end: str) -> dict:
     from googleapiclient.discovery import build
     from google.oauth2 import service_account
 
-    creds_info = json.loads(st.secrets["GA4_CREDENTIALS"])
-    creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
+    creds_dict = {
+        "type": "service_account",
+        "project_id": st.secrets["GA4_PROJECT_ID"],
+        "private_key_id": st.secrets["GA4_PRIVATE_KEY_ID"],
+        "private_key": st.secrets["GA4_PRIVATE_KEY"].replace("\\n", "\n"),
+        "client_email": st.secrets["GA4_CLIENT_EMAIL"],
+        "client_id": st.secrets["GA4_CLIENT_ID"],
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_x509_cert_url": st.secrets["GA4_CLIENT_X509_CERT_URL"],
+        "universe_domain": "googleapis.com",
+    }
     credentials = service_account.Credentials.from_service_account_info(
-        creds_info,
+        creds_dict,
         scopes=["https://www.googleapis.com/auth/webmasters.readonly"],
     )
     service = build("searchconsole", "v1", credentials=credentials)
@@ -281,10 +303,21 @@ def fetch_linkedin_summary() -> dict:
     import gspread
     from google.oauth2.service_account import Credentials
 
-    creds_info = json.loads(st.secrets["GA4_CREDENTIALS"])
-    creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
+    creds_dict = {
+        "type": "service_account",
+        "project_id": st.secrets["GA4_PROJECT_ID"],
+        "private_key_id": st.secrets["GA4_PRIVATE_KEY_ID"],
+        "private_key": st.secrets["GA4_PRIVATE_KEY"].replace("\\n", "\n"),
+        "client_email": st.secrets["GA4_CLIENT_EMAIL"],
+        "client_id": st.secrets["GA4_CLIENT_ID"],
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_x509_cert_url": st.secrets["GA4_CLIENT_X509_CERT_URL"],
+        "universe_domain": "googleapis.com",
+    }
     creds = Credentials.from_service_account_info(
-        creds_info,
+        creds_dict,
         scopes=[
             "https://www.googleapis.com/auth/spreadsheets.readonly",
             "https://www.googleapis.com/auth/drive.readonly",

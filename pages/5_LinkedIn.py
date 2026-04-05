@@ -3,7 +3,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
 import pandas as pd
-import json
+
 
 st.set_page_config(
     page_title="LinkedIn — Goodman Financial",
@@ -115,14 +115,26 @@ with st.sidebar:
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def fetch_sheet(sheet_id: str, credentials_json: str) -> pd.DataFrame:
+def fetch_sheet(sheet_id: str, project_id: str, private_key_id: str, private_key: str,
+                client_email: str, client_id: str, client_x509_cert_url: str) -> pd.DataFrame:
     import gspread
     from google.oauth2.service_account import Credentials
 
-    creds_info = json.loads(credentials_json)
-    creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
+    creds_dict = {
+        "type": "service_account",
+        "project_id": project_id,
+        "private_key_id": private_key_id,
+        "private_key": private_key.replace("\\n", "\n"),
+        "client_email": client_email,
+        "client_id": client_id,
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_x509_cert_url": client_x509_cert_url,
+        "universe_domain": "googleapis.com",
+    }
     creds = Credentials.from_service_account_info(
-        creds_info,
+        creds_dict,
         scopes=[
             "https://www.googleapis.com/auth/spreadsheets.readonly",
             "https://www.googleapis.com/auth/drive.readonly",
@@ -164,17 +176,23 @@ st.markdown("---")
 
 try:
     sheet_id = st.secrets["LINKEDIN_SHEET_ID"]
-    credentials_json = st.secrets["GA4_CREDENTIALS"]
+    _project_id = st.secrets["GA4_PROJECT_ID"]
+    _private_key_id = st.secrets["GA4_PRIVATE_KEY_ID"]
+    _private_key = st.secrets["GA4_PRIVATE_KEY"]
+    _client_email = st.secrets["GA4_CLIENT_EMAIL"]
+    _client_id = st.secrets["GA4_CLIENT_ID"]
+    _client_x509_cert_url = st.secrets["GA4_CLIENT_X509_CERT_URL"]
 except KeyError as e:
-    st.error(f"Missing secret: {e}. Add LINKEDIN_SHEET_ID and GA4_CREDENTIALS to secrets.toml.")
+    st.error(f"Missing secret: {e}. Add LINKEDIN_SHEET_ID and all GA4_* secrets to secrets.toml.")
     st.stop()
 
 with st.spinner("Loading LinkedIn data from Google Sheet…"):
     try:
-        raw_df = fetch_sheet(sheet_id, credentials_json)
+        raw_df = fetch_sheet(sheet_id, _project_id, _private_key_id, _private_key,
+                             _client_email, _client_id, _client_x509_cert_url)
     except Exception as e:
         st.error(f"Could not load Google Sheet: {e}")
-        st.info("Make sure the sheet is shared with your service account email (from GA4_CREDENTIALS → client_email).")
+        st.info(f"Make sure the sheet is shared with your service account email ({_client_email}).")
         st.stop()
 
 if raw_df.empty:
