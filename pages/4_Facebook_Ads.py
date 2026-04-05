@@ -1,31 +1,33 @@
 import streamlit as st
 import plotly.graph_objects as go
-import plotly.express as px
 from datetime import datetime, timedelta
 import pandas as pd
 
-st.set_page_config(
-    page_title="Facebook Ads — Goodman Financial",
-    page_icon="📣",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="Facebook Ads — Goodman Financial", page_icon="📣",
+                   layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 html,body,[class*="css"]{font-family:'Inter',sans-serif;}
 #MainMenu,footer,header{visibility:hidden;}
-[data-testid="stSidebar"]{background-color:#0F6E56;}
-[data-testid="stSidebar"] .stMarkdown,
-[data-testid="stSidebar"] label,
-[data-testid="stSidebar"] p,
-[data-testid="stSidebar"] span{color:rgba(255,255,255,0.92)!important;}
+.stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"],.main,.block-container{background-color:#0F1A14!important;}
+[data-testid="stMarkdownContainer"] p,[data-testid="stMarkdownContainer"] li,[data-testid="stMarkdownContainer"] span{color:#E8F5E9!important;}
+.stCaption,[data-testid="stCaptionContainer"]{color:#9AC89E!important;}
+label{color:#9AC89E!important;}
+h1{color:#E8F5E9!important;font-weight:700;}h2{color:#E8F5E9!important;font-weight:600;}h3,h4{color:#9AC89E!important;font-weight:600;}
+[data-testid="stSidebar"]{background-color:#0F6E56!important;}
+[data-testid="stSidebar"] *{color:rgba(255,255,255,0.92)!important;}
 [data-testid="stSidebarNav"] a[aria-selected="true"]{background-color:rgba(255,255,255,0.18)!important;border-left:3px solid white;}
-.stButton>button[kind="primary"]{background-color:#0F6E56!important;border-color:#0F6E56!important;color:white!important;font-weight:600;border-radius:6px;}
-[data-testid="stMetricValue"]{color:#0F6E56!important;font-weight:700!important;}
-h1,h2{color:#0F6E56!important;font-weight:700;}
-hr{border-color:#E0EDE9!important;}
+.stButton>button[kind="primary"]{background-color:#4CAF50!important;border-color:#4CAF50!important;color:#0F1A14!important;font-weight:700;border-radius:6px;}
+.stButton>button:not([kind="primary"]){background-color:#1A2E22!important;border-color:#2A4A35!important;color:#E8F5E9!important;border-radius:6px;}
+.stTabs [data-baseweb="tab-list"]{background-color:transparent;border-bottom:2px solid #2A4A35;}
+.stTabs [data-baseweb="tab"]{color:#9AC89E!important;}
+.stTabs [data-baseweb="tab"][aria-selected="true"]{border-bottom:3px solid #4CAF50!important;color:#E8F5E9!important;font-weight:600;}
+[data-testid="stDataFrame"]{border:1px solid #2A4A35;border-radius:8px;}
+[data-testid="stAlert"]{background-color:#1A2E22!important;border-color:#2A4A35!important;}
+details[data-testid="stExpander"]>summary{background-color:#1A2E22!important;border:1px solid #2A4A35!important;border-radius:8px!important;}
+hr{border-color:#2A4A35!important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -33,48 +35,47 @@ if not st.session_state.get("authenticated"):
     st.warning("Please sign in from the **Overview** page.")
     st.stop()
 
-COLORS = ["#0F6E56", "#1A9E7A", "#2DB896", "#5DCFB2", "#88E5CD", "#B4F0E0"]
+COLORS = ["#4CAF50", "#2DB896", "#66BB6A", "#81C784", "#1A9E7A", "#0F6E56"]
 
 def kpi_card(title, value, delta=None):
     delta_html = ""
     if delta is not None:
-        clr = "#1B8E4B" if delta >= 0 else "#C0392B"
+        clr = "#4CAF50" if delta >= 0 else "#EF5350"
         arrow = "▲" if delta >= 0 else "▼"
         delta_html = f'<p style="color:{clr};font-size:0.82rem;margin:4px 0 0;">{arrow} {abs(delta):.1f}%</p>'
-    return f"""<div style="background:#F4FBF8;border:1px solid #D4EDE5;border-left:4px solid #0F6E56;
+    return f"""<div style="background:#1A2E22;border:1px solid #2A4A35;border-left:4px solid #4CAF50;
                 border-radius:8px;padding:1.1rem 1.25rem;">
-        <p style="color:#6B7280;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.06em;margin:0 0 6px;">{title}</p>
-        <h2 style="color:#0F2A22;font-size:1.7rem;font-weight:700;margin:0;">{value}</h2>
+        <p style="color:#9AC89E;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.06em;margin:0 0 6px;">{title}</p>
+        <h2 style="color:#4CAF50;font-size:1.7rem;font-weight:700;margin:0;">{value}</h2>
         {delta_html}</div>"""
 
 def chart_layout(title="", xaxis_title="", yaxis_title=""):
     return dict(
-        title=dict(text=title, font=dict(size=15, color="#0F2A22"), x=0),
-        plot_bgcolor="white", paper_bgcolor="white",
-        font=dict(family="Inter, sans-serif", color="#374151"),
-        xaxis=dict(title=xaxis_title, gridcolor="#F3F4F6", linecolor="#E5E7EB"),
-        yaxis=dict(title=yaxis_title, gridcolor="#F3F4F6", linecolor="#E5E7EB"),
+        title=dict(text=title, font=dict(size=15, color="#E8F5E9"), x=0),
+        plot_bgcolor="#0F1A14", paper_bgcolor="#0F1A14",
+        font=dict(family="Inter, sans-serif", color="#E8F5E9"),
+        xaxis=dict(title=xaxis_title, gridcolor="#1A2E22", linecolor="#2A4A35",
+                   color="#9AC89E", tickfont=dict(color="#9AC89E"), title_font=dict(color="#9AC89E")),
+        yaxis=dict(title=yaxis_title, gridcolor="#1A2E22", linecolor="#2A4A35",
+                   color="#9AC89E", tickfont=dict(color="#9AC89E"), title_font=dict(color="#9AC89E")),
         margin=dict(t=50, b=40, l=50, r=20),
-        legend=dict(bgcolor="rgba(0,0,0,0)"),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#E8F5E9")),
         hovermode="x unified",
     )
-
 
 with st.sidebar:
     st.markdown("### 📊 Goodman Financial")
     st.markdown("---")
     st.markdown("**Date Range**")
-    range_opt = st.selectbox("Range", ["Last 7 days", "Last 30 days", "Last 90 days", "Custom"], index=1, label_visibility="collapsed")
+    range_opt = st.selectbox("Range", ["Last 7 days", "Last 30 days", "Last 90 days", "Custom"],
+                             index=1, label_visibility="collapsed")
     today = datetime.today().date()
-    if range_opt == "Last 7 days":
-        start_date, end_date = today - timedelta(days=7), today
-    elif range_opt == "Last 30 days":
-        start_date, end_date = today - timedelta(days=30), today
-    elif range_opt == "Last 90 days":
-        start_date, end_date = today - timedelta(days=90), today
+    if range_opt == "Last 7 days":     start_date, end_date = today - timedelta(days=7), today
+    elif range_opt == "Last 30 days":  start_date, end_date = today - timedelta(days=30), today
+    elif range_opt == "Last 90 days":  start_date, end_date = today - timedelta(days=90), today
     else:
         start_date = st.date_input("Start", value=today - timedelta(days=30))
-        end_date = st.date_input("End", value=today)
+        end_date   = st.date_input("End",   value=today)
     st.caption(f"{start_date.strftime('%b %d')} – {end_date.strftime('%b %d, %Y')}")
     st.markdown("---")
     if st.button("Sign Out", use_container_width=True):
@@ -90,270 +91,212 @@ def fetch_meta(start: str, end: str, account_id: str, access_token: str):
 
     FacebookAdsApi.init(access_token=access_token)
     account = AdAccount(account_id)
-
-    common_fields = [
-        AdsInsights.Field.spend,
-        AdsInsights.Field.impressions,
-        AdsInsights.Field.clicks,
-        AdsInsights.Field.ctr,
-        AdsInsights.Field.cpc,
-        AdsInsights.Field.reach,
-        AdsInsights.Field.frequency,
-    ]
     time_range = {"since": start, "until": end}
 
-    # Account-level totals
-    totals_iter = account.get_insights(
-        fields=common_fields,
+    common_fields = [AdsInsights.Field.spend, AdsInsights.Field.impressions,
+                     AdsInsights.Field.clicks, AdsInsights.Field.ctr,
+                     AdsInsights.Field.cpc, AdsInsights.Field.reach, AdsInsights.Field.frequency]
+
+    # Account totals
+    totals_list = list(account.get_insights(
+        fields=common_fields + [AdsInsights.Field.actions],
         params={"time_range": time_range, "level": "account"},
-    )
-    totals_list = list(totals_iter)
+    ))
     totals = dict(totals_list[0]) if totals_list else {}
+    actions = totals.get("actions", [])
+    leads = sum(int(a.get("value", 0)) for a in actions
+                if a.get("action_type") in ("lead", "offsite_conversion.fb_pixel_lead",
+                                            "offsite_conversion.fb_pixel_purchase", "purchase"))
 
-    # Daily spend for trend chart
-    daily_iter = account.get_insights(
-        fields=[AdsInsights.Field.spend, AdsInsights.Field.impressions, AdsInsights.Field.clicks],
-        params={"time_range": time_range, "time_increment": 1, "level": "account"},
-    )
+    # Daily
     daily_rows = [
-        {
-            "date": dict(row).get("date_start", ""),
-            "spend": float(dict(row).get("spend", 0)),
-            "impressions": int(dict(row).get("impressions", 0)),
-            "clicks": int(dict(row).get("clicks", 0)),
-        }
-        for row in daily_iter
+        {"date": dict(r).get("date_start",""), "spend": float(dict(r).get("spend",0)),
+         "impressions": int(dict(r).get("impressions",0)), "clicks": int(dict(r).get("clicks",0))}
+        for r in account.get_insights(
+            fields=[AdsInsights.Field.spend, AdsInsights.Field.impressions, AdsInsights.Field.clicks],
+            params={"time_range": time_range, "time_increment": 1, "level": "account"},
+        )
     ]
 
-    # Campaign breakdown
-    campaign_fields = common_fields + [
-        AdsInsights.Field.campaign_name,
-        AdsInsights.Field.actions,
-    ]
-    campaign_iter = account.get_insights(
-        fields=campaign_fields,
-        params={
-            "time_range": time_range,
-            "level": "campaign",
-            "sort": [{"field": "spend", "direction": "DESCENDING"}],
-            "limit": 20,
-        },
-    )
+    # Campaigns
     campaign_rows = []
-    for row in campaign_iter:
+    for row in account.get_insights(
+        fields=common_fields + [AdsInsights.Field.campaign_name, AdsInsights.Field.actions],
+        params={"time_range": time_range, "level": "campaign",
+                "sort": [{"field": "spend", "direction": "DESCENDING"}], "limit": 20},
+    ):
         d = dict(row)
-        actions = d.get("actions", [])
-        conversions = sum(
-            int(a.get("value", 0))
-            for a in actions
-            if a.get("action_type") in ("lead", "offsite_conversion.fb_pixel_lead",
-                                        "offsite_conversion.fb_pixel_purchase", "purchase")
-        )
+        conv = sum(int(a.get("value", 0)) for a in d.get("actions", [])
+                   if a.get("action_type") in ("lead", "offsite_conversion.fb_pixel_lead",
+                                               "offsite_conversion.fb_pixel_purchase", "purchase"))
         campaign_rows.append({
             "campaign": d.get("campaign_name", "Unknown"),
-            "spend": float(d.get("spend", 0)),
-            "impressions": int(d.get("impressions", 0)),
-            "clicks": int(d.get("clicks", 0)),
-            "ctr": float(d.get("ctr", 0)),
-            "cpc": float(d.get("cpc", 0)),
-            "conversions": conversions,
+            "spend": float(d.get("spend", 0)), "impressions": int(d.get("impressions", 0)),
+            "clicks": int(d.get("clicks", 0)), "ctr": float(d.get("ctr", 0)),
+            "cpc": float(d.get("cpc", 0)), "conversions": conv,
         })
 
-    # Adset breakdown
-    adset_iter = account.get_insights(
-        fields=[
-            AdsInsights.Field.adset_name,
-            AdsInsights.Field.spend,
-            AdsInsights.Field.impressions,
-            AdsInsights.Field.clicks,
-            AdsInsights.Field.ctr,
-            AdsInsights.Field.cpc,
-        ],
-        params={
-            "time_range": time_range,
-            "level": "adset",
-            "sort": [{"field": "spend", "direction": "DESCENDING"}],
-            "limit": 20,
-        },
-    )
+    # Ad sets
     adset_rows = [
-        {
-            "adset": dict(r).get("adset_name", ""),
-            "spend": float(dict(r).get("spend", 0)),
-            "impressions": int(dict(r).get("impressions", 0)),
-            "clicks": int(dict(r).get("clicks", 0)),
-            "ctr": float(dict(r).get("ctr", 0)),
-            "cpc": float(dict(r).get("cpc", 0)),
-        }
-        for r in adset_iter
+        {"adset": dict(r).get("adset_name",""), "spend": float(dict(r).get("spend",0)),
+         "impressions": int(dict(r).get("impressions",0)), "clicks": int(dict(r).get("clicks",0)),
+         "ctr": float(dict(r).get("ctr",0)), "cpc": float(dict(r).get("cpc",0))}
+        for r in account.get_insights(
+            fields=[AdsInsights.Field.adset_name, AdsInsights.Field.spend,
+                    AdsInsights.Field.impressions, AdsInsights.Field.clicks,
+                    AdsInsights.Field.ctr, AdsInsights.Field.cpc],
+            params={"time_range": time_range, "level": "adset",
+                    "sort": [{"field": "spend", "direction": "DESCENDING"}], "limit": 20},
+        )
     ]
 
     return {
-        "spend": float(totals.get("spend", 0)),
-        "impressions": int(totals.get("impressions", 0)),
-        "clicks": int(totals.get("clicks", 0)),
-        "ctr": float(totals.get("ctr", 0)),
-        "cpc": float(totals.get("cpc", 0)),
-        "reach": int(totals.get("reach", 0)),
-        "frequency": float(totals.get("frequency", 0)),
-        "daily": daily_rows,
-        "campaigns": campaign_rows,
-        "adsets": adset_rows,
+        "spend": float(totals.get("spend", 0)), "impressions": int(totals.get("impressions", 0)),
+        "clicks": int(totals.get("clicks", 0)), "ctr": float(totals.get("ctr", 0)),
+        "cpc": float(totals.get("cpc", 0)), "reach": int(totals.get("reach", 0)),
+        "frequency": float(totals.get("frequency", 0)), "leads": leads,
+        "daily": daily_rows, "campaigns": campaign_rows, "adsets": adset_rows,
     }
 
 
-# ── Page ──────────────────────────────────────────────────────────────────────
+# ── Page ─────────────────────────────────────────────────────────────────────
 st.markdown("## Facebook / Meta Ads")
 st.markdown(f"**{start_date.strftime('%B %d')} – {end_date.strftime('%B %d, %Y')}**")
 st.markdown("---")
 
 start_str = start_date.strftime("%Y-%m-%d")
-end_str = end_date.strftime("%Y-%m-%d")
+end_str   = end_date.strftime("%Y-%m-%d")
 
 try:
     access_token = st.secrets["META_ACCESS_TOKEN"].strip()
-    account_id = st.secrets["META_AD_ACCOUNT_ID"].strip()
+    account_id   = st.secrets["META_AD_ACCOUNT_ID"].strip()
 except KeyError as e:
     st.error(f"Missing secret: {e}. Add META_ACCESS_TOKEN and META_AD_ACCOUNT_ID to secrets.toml.")
     st.stop()
 
-with st.expander("🔍 Debug — credential check (expand to verify)", expanded=False):
+with st.expander("🔍 Debug — credential check", expanded=False):
     st.markdown(f"**Ad Account ID:** `{account_id}`")
-    st.markdown(f"**Access Token (first 10 chars):** `{access_token[:10]}…` &nbsp; length: `{len(access_token)}`")
+    st.markdown(f"**Token prefix:** `{access_token[:10]}…` &nbsp; length: `{len(access_token)}`")
     if len(access_token) < 50:
-        st.warning("Token looks short — it may be truncated in secrets.toml. Tokens are typically 150–250 characters.")
+        st.warning("Token looks short — it may be truncated. Tokens are typically 150–250 characters.")
 
 with st.spinner("Fetching Meta Ads data…"):
     try:
         data = fetch_meta(start_str, end_str, account_id, access_token)
     except Exception as e:
         st.error(f"Could not load Meta Ads data: {e}")
-        st.markdown("**Full error details:**")
         st.code(str(e), language="text")
-        st.markdown("**Checklist:**")
-        st.markdown(
-            "- Confirm `META_ACCESS_TOKEN` is a **System User** token (not a short-lived user token)\n"
-            "- Token must have `ads_read` and `ads_management` permissions\n"
-            "- `META_AD_ACCOUNT_ID` must be in the format `act_XXXXXXXXXX`\n"
-            "- Token must not be expired — regenerate in Meta Business Manager if needed"
-        )
+        st.markdown("**Checklist:**\n"
+                    "- `META_ACCESS_TOKEN` must be a **System User** token with `ads_read` permission\n"
+                    "- `META_AD_ACCOUNT_ID` must be in the format `act_XXXXXXXXXX`\n"
+                    "- Token must not be expired — regenerate in Meta Business Manager if needed")
         st.stop()
 
-# ── KPI Cards ──
-c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
-c1.markdown(kpi_card("Spend", f"${data['spend']:,.2f}"), unsafe_allow_html=True)
-c2.markdown(kpi_card("Impressions", f"{data['impressions']:,}"), unsafe_allow_html=True)
-c3.markdown(kpi_card("Reach", f"{data['reach']:,}"), unsafe_allow_html=True)
-c4.markdown(kpi_card("Clicks", f"{data['clicks']:,}"), unsafe_allow_html=True)
-c5.markdown(kpi_card("CTR", f"{data['ctr']:.2f}%"), unsafe_allow_html=True)
-c6.markdown(kpi_card("CPC", f"${data['cpc']:.2f}"), unsafe_allow_html=True)
-c7.markdown(kpi_card("Frequency", f"{data['frequency']:.2f}"), unsafe_allow_html=True)
+# ── Empty state ───────────────────────────────────────────────────────────────
+has_data = data["spend"] > 0 or data["impressions"] > 0
 
+if not has_data:
+    st.info("No campaign data found for this date range. This may be because the account is new "
+            "or has no active campaigns in this period.", icon="ℹ️")
+    st.markdown("---")
+    st.caption(f"Meta Marketing API · Account {account_id} · No data for selected range")
+    st.stop()
+
+# ── KPI Cards ────────────────────────────────────────────────────────────────
+c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
+c1.markdown(kpi_card("Spend",       f"${data['spend']:,.2f}"),       unsafe_allow_html=True)
+c2.markdown(kpi_card("Impressions", f"{data['impressions']:,}"),      unsafe_allow_html=True)
+c3.markdown(kpi_card("Reach",       f"{data['reach']:,}"),            unsafe_allow_html=True)
+c4.markdown(kpi_card("Clicks",      f"{data['clicks']:,}"),           unsafe_allow_html=True)
+c5.markdown(kpi_card("CTR",         f"{data['ctr']:.2f}%"),           unsafe_allow_html=True)
+c6.markdown(kpi_card("CPC",         f"${data['cpc']:.2f}"),           unsafe_allow_html=True)
+c7.markdown(kpi_card("Leads",       f"{data['leads']:,}"),            unsafe_allow_html=True)
+cpl = data["spend"] / data["leads"] if data["leads"] > 0 else None
+c8.markdown(kpi_card("CPL", f"${cpl:.2f}" if cpl else "—"),          unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
-# ── Daily trend ──
+# ── Daily trend ──────────────────────────────────────────────────────────────
 daily_df = pd.DataFrame(data["daily"])
 if not daily_df.empty:
     daily_df["date"] = pd.to_datetime(daily_df["date"])
-
     tab1, tab2 = st.tabs(["Spend Over Time", "Impressions & Clicks"])
 
     with tab1:
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=daily_df["date"], y=daily_df["spend"],
-            name="Spend ($)", line=dict(color="#0F6E56", width=2.5),
-            fill="tozeroy", fillcolor="rgba(15,110,86,0.08)",
-            hovertemplate="$%{y:,.2f}<extra>Spend</extra>",
-        ))
+        fig.add_trace(go.Scatter(x=daily_df["date"], y=daily_df["spend"], name="Spend ($)",
+                                 line=dict(color="#4CAF50", width=2.5),
+                                 fill="tozeroy", fillcolor="rgba(76,175,80,0.10)",
+                                 hovertemplate="$%{y:,.2f}<extra>Spend</extra>"))
         fig.update_layout(**chart_layout("Daily Ad Spend", "Date", "Spend ($)"))
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
         fig2 = go.Figure()
-        fig2.add_trace(go.Bar(
-            x=daily_df["date"], y=daily_df["impressions"],
-            name="Impressions", marker_color="rgba(15,110,86,0.2)", yaxis="y2",
-        ))
-        fig2.add_trace(go.Scatter(
-            x=daily_df["date"], y=daily_df["clicks"],
-            name="Clicks", line=dict(color="#0F6E56", width=2.5),
-        ))
-        fig2.update_layout(
-            **chart_layout("Impressions & Clicks", "Date"),
-            yaxis=dict(title="Clicks", gridcolor="#F3F4F6"),
-            yaxis2=dict(title="Impressions", overlaying="y", side="right", gridcolor="rgba(0,0,0,0)"),
-        )
+        fig2.add_trace(go.Bar(x=daily_df["date"], y=daily_df["impressions"],
+                              name="Impressions", marker_color="rgba(76,175,80,0.18)", yaxis="y2"))
+        fig2.add_trace(go.Scatter(x=daily_df["date"], y=daily_df["clicks"],
+                                  name="Clicks", line=dict(color="#4CAF50", width=2.5)))
+        layout_args = chart_layout("Impressions & Clicks", "Date")
+        layout_args["yaxis"]  = dict(title="Clicks", gridcolor="#1A2E22", color="#9AC89E",
+                                     tickfont=dict(color="#9AC89E"), title_font=dict(color="#9AC89E"))
+        layout_args["yaxis2"] = dict(title="Impressions", overlaying="y", side="right",
+                                     gridcolor="rgba(0,0,0,0)", color="#9AC89E",
+                                     tickfont=dict(color="#9AC89E"), title_font=dict(color="#9AC89E"))
+        fig2.update_layout(**layout_args)
         st.plotly_chart(fig2, use_container_width=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# ── Campaign breakdown ──
+# ── Campaign breakdown ────────────────────────────────────────────────────────
 campaigns_df = pd.DataFrame(data["campaigns"])
 if not campaigns_df.empty:
     col_left, col_right = st.columns(2)
 
     with col_left:
-        top_campaigns = campaigns_df.head(10)
+        top10 = campaigns_df.head(10)
         fig3 = go.Figure(go.Bar(
-            x=top_campaigns["spend"],
-            y=top_campaigns["campaign"].str[:40],
-            orientation="h",
+            x=top10["spend"], y=top10["campaign"].str[:40], orientation="h",
             marker_color=COLORS[0],
-            text=top_campaigns["spend"].apply(lambda v: f"${v:,.0f}"),
-            textposition="outside",
+            text=top10["spend"].apply(lambda v: f"${v:,.0f}"),
+            textposition="outside", textfont=dict(color="#E8F5E9"),
         ))
-        fig3.update_layout(**chart_layout("Campaigns by Spend ($)"))
-        fig3.update_layout(yaxis=dict(autorange="reversed"), height=420)
+        layout3 = chart_layout("Campaigns by Spend ($)")
+        layout3["yaxis"]["autorange"] = "reversed"
+        fig3.update_layout(**layout3, height=420)
         st.plotly_chart(fig3, use_container_width=True)
 
     with col_right:
-        if "conversions" in campaigns_df.columns:
-            conv_df = campaigns_df[campaigns_df["conversions"] > 0].head(10)
-            if not conv_df.empty:
-                fig4 = go.Figure(go.Bar(
-                    x=conv_df["conversions"],
-                    y=conv_df["campaign"].str[:40],
-                    orientation="h",
-                    marker_color=COLORS[1],
-                    text=conv_df["conversions"],
-                    textposition="outside",
-                ))
-                fig4.update_layout(**chart_layout("Campaigns by Conversions"))
-                fig4.update_layout(yaxis=dict(autorange="reversed"), height=420)
-                st.plotly_chart(fig4, use_container_width=True)
+        conv_df = campaigns_df[campaigns_df["conversions"] > 0].head(10)
+        if not conv_df.empty:
+            fig4 = go.Figure(go.Bar(
+                x=conv_df["conversions"], y=conv_df["campaign"].str[:40], orientation="h",
+                marker_color=COLORS[1],
+                text=conv_df["conversions"],
+                textposition="outside", textfont=dict(color="#E8F5E9"),
+            ))
+            layout4 = chart_layout("Campaigns by Conversions")
+            layout4["yaxis"]["autorange"] = "reversed"
+            fig4.update_layout(**layout4, height=420)
+            st.plotly_chart(fig4, use_container_width=True)
 
     st.markdown("#### Campaign Detail")
-    display_df = campaigns_df.rename(columns={
-        "campaign": "Campaign",
-        "spend": "Spend ($)",
-        "impressions": "Impressions",
-        "clicks": "Clicks",
-        "ctr": "CTR (%)",
-        "cpc": "CPC ($)",
-        "conversions": "Conversions",
-    })
-    display_df["Spend ($)"] = display_df["Spend ($)"].apply(lambda x: f"${x:,.2f}")
-    display_df["CPC ($)"] = display_df["CPC ($)"].apply(lambda x: f"${x:,.2f}")
-    display_df["CTR (%)"] = display_df["CTR (%)"].apply(lambda x: f"{x:.2f}%")
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    disp = campaigns_df.copy()
+    disp["spend"] = disp["spend"].apply(lambda x: f"${x:,.2f}")
+    disp["cpc"]   = disp["cpc"].apply(lambda x: f"${x:,.2f}")
+    disp["ctr"]   = disp["ctr"].apply(lambda x: f"{x:.2f}%")
+    disp.columns  = ["Campaign","Spend ($)","Impressions","Clicks","CTR (%)","CPC ($)","Conversions"]
+    st.dataframe(disp, use_container_width=True, hide_index=True, height=400)
 
-# ── Adset breakdown ──
+# ── Ad set breakdown ──────────────────────────────────────────────────────────
 adsets_df = pd.DataFrame(data["adsets"])
 if not adsets_df.empty:
     st.markdown("#### Ad Set Detail")
-    display_as = adsets_df.rename(columns={
-        "adset": "Ad Set",
-        "spend": "Spend ($)",
-        "impressions": "Impressions",
-        "clicks": "Clicks",
-        "ctr": "CTR (%)",
-        "cpc": "CPC ($)",
-    })
-    display_as["Spend ($)"] = display_as["Spend ($)"].apply(lambda x: f"${x:,.2f}")
-    display_as["CPC ($)"] = display_as["CPC ($)"].apply(lambda x: f"${x:,.2f}")
-    display_as["CTR (%)"] = display_as["CTR (%)"].apply(lambda x: f"{x:.2f}%")
-    st.dataframe(display_as, use_container_width=True, hide_index=True)
+    disp_as = adsets_df.copy()
+    disp_as["spend"] = disp_as["spend"].apply(lambda x: f"${x:,.2f}")
+    disp_as["cpc"]   = disp_as["cpc"].apply(lambda x: f"${x:,.2f}")
+    disp_as["ctr"]   = disp_as["ctr"].apply(lambda x: f"{x:.2f}%")
+    disp_as.columns  = ["Ad Set","Spend ($)","Impressions","Clicks","CTR (%)","CPC ($)"]
+    st.dataframe(disp_as, use_container_width=True, hide_index=True, height=400)
 
 st.markdown("---")
 st.caption(f"Data source: Meta Marketing API · Account {account_id} · Refreshed hourly")
