@@ -407,6 +407,37 @@ def fetch_ga4_conversion_rate_by_source(start, end):
     return rows[:10]
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_gf_lead_count(start_date, end_date):
+    """Return total GF lead count across all configured form IDs."""
+    import hmac as _hmac, hashlib, base64, time as _time, json, requests as _req
+    api_key     = st.secrets["GF_API_KEY"]
+    private_key = st.secrets["GF_PRIVATE_KEY"]
+    base        = st.secrets["GF_SITE_URL"].rstrip("/")
+    form_ids    = st.secrets["GF_FORM_IDS"].split(",")
+    expires     = int(_time.time()) + 3600
+    string_to_sign = f"{api_key}:{expires}"
+    sig = base64.b64encode(
+        _hmac.new(private_key.encode(), string_to_sign.encode(), hashlib.sha1).digest()
+    ).decode()
+    total = 0
+    search = json.dumps({"start_date": str(start_date), "end_date": str(end_date)})
+    for form_id in form_ids:
+        url = (
+            f"{base}/gravityformsapi/entries/"
+            f"?api_key={api_key}&signature={sig}&expires={expires}"
+            f"&form_ids[]={form_id.strip()}"
+            f"&paging[page_size]=1&paging[current_page]=1"
+            f"&search={search}"
+        )
+        try:
+            data = _req.get(url, timeout=15).json()
+            total += int(data.get("response", {}).get("total_count", 0))
+        except Exception:
+            pass
+    return total
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_gsc_summary(start, end):
     from googleapiclient.discovery import build
@@ -475,6 +506,7 @@ meta_data, meta_ok, meta_err = None, False, ""
 li_data,  li_ok,  li_err     = None, False, ""
 form_data                    = {"total": 0, "channels": []}
 conv_rate_data               = []
+gf_leads, gf_ok              = 0, False
 
 with st.spinner("Loading data from all channels…"):
     try: ga4_data  = fetch_ga4_summary(start_str, end_str);  ga4_ok  = True
@@ -486,6 +518,10 @@ with st.spinner("Loading data from all channels…"):
         except Exception: form_data = {"total": 0, "channels": []}
         try: conv_rate_data = fetch_ga4_conversion_rate_by_source(start_str, end_str)
         except Exception: conv_rate_data = []
+    try:
+        gf_leads = fetch_gf_lead_count(start_date, end_date)
+        gf_ok    = True
+    except Exception: pass
     try: gsc_data  = fetch_gsc_summary(start_str, end_str);  gsc_ok  = True
     except Exception as e: gsc_err  = str(e)
     try: meta_data = fetch_meta_summary(start_str, end_str); meta_ok = True
@@ -495,9 +531,10 @@ with st.spinner("Loading data from all channels…"):
 
 # ── Fetch prior period ────────────────────────────────────────────────────────
 p_ga4 = p_gsc = p_meta = p_li = None
-p_ext_data     = None
-p_form_data    = {"total": 0, "channels": [], "daily_by_channel": []}
+p_ext_data       = None
+p_form_data      = {"total": 0, "channels": [], "daily_by_channel": []}
 p_conv_rate_data = []
+p_gf_leads       = 0
 if compare_enabled and prior_start_str:
     with st.spinner("Loading prior period…"):
         try: p_ga4      = fetch_ga4_summary(prior_start_str, prior_end_str)
@@ -508,6 +545,8 @@ if compare_enabled and prior_start_str:
         except: p_form_data = {"total": 0, "channels": [], "daily_by_channel": []}
         try: p_conv_rate_data = fetch_ga4_conversion_rate_by_source(prior_start_str, prior_end_str)
         except: p_conv_rate_data = []
+        try: p_gf_leads = fetch_gf_lead_count(prior_start, prior_end)
+        except: pass
         try: p_gsc  = fetch_gsc_summary(prior_start_str, prior_end_str)
         except: pass
         try: p_meta = fetch_meta_summary(prior_start_str, prior_end_str)
@@ -544,9 +583,11 @@ fb_leads = meta_data["leads"]   if meta_ok and meta_data else 0
 li_spend = float(li_data.get("spend", 0)) if li_ok and li_data else 0.0
 li_leads = int(li_data.get("leads", 0))   if li_ok and li_data else 0
 form_leads         = form_data["total"]
+# Use GF API count when available (more accurate than GA4 event count)
+organic_leads      = gf_leads if gf_ok else form_leads
 total_spend        = fb_spend + li_spend
-total_conversions  = fb_leads + li_leads + form_leads   # paid leads + GA4 form submissions
-paid_leads         = fb_leads + li_leads                # for CPL (spend-based), exclude organic forms
+total_conversions  = fb_leads + li_leads + organic_leads  # paid leads + form submissions
+paid_leads         = fb_leads + li_leads                  # for CPL (spend-based)
 blended_cpl = (total_spend / paid_leads) if paid_leads > 0 else None
 
 p_fb_spend    = float(p_meta.get("spend", 0)) if compare_enabled and p_meta else 0.0
@@ -555,7 +596,8 @@ p_total_spend = p_fb_spend + p_li_spend
 p_fb_leads    = int(p_meta.get("leads", 0))   if compare_enabled and p_meta else 0
 p_li_leads    = int(p_li.get("leads", 0))     if compare_enabled and p_li  else 0
 p_paid_leads  = p_fb_leads + p_li_leads
-p_total_conv  = p_paid_leads + p_form_data["total"]
+p_organic_leads = p_gf_leads if gf_ok else p_form_data["total"]
+p_total_conv  = p_paid_leads + p_organic_leads
 p_cpl         = (p_total_spend / p_paid_leads) if compare_enabled and p_paid_leads > 0 else None
 
 d_sessions = pct_delta(total_sessions, p_ga4["sessions"]) if compare_enabled and p_ga4 else None
@@ -563,7 +605,7 @@ d_spend    = pct_delta(total_spend, p_total_spend)         if compare_enabled el
 d_conv     = pct_delta(total_conversions, p_total_conv)    if compare_enabled else None
 d_cpl      = pct_delta(blended_cpl, p_cpl)                if compare_enabled else None
 
-has_conv = ga4_ok or meta_ok or li_ok
+has_conv = ga4_ok or meta_ok or li_ok or gf_ok
 
 
 # ── Row 1: 4 main KPI cards ──────────────────────────────────────────────────
@@ -599,9 +641,12 @@ if ext_ok and ext_data:
                            f"{q['pages_per_session']:.2f}",
                            delta=pct_delta(q['pages_per_session'],      pq['pages_per_session'])     if pq else None),
                  unsafe_allow_html=True)
+    # Prefer GF API count; fall back to GA4 event count
+    _lead_val   = gf_leads if gf_ok else form_leads
+    _p_lead_val = p_gf_leads if gf_ok else p_form_data["total"]
     tq4.markdown(kpi_card("Form Submissions",
-                           fmt_number(form_leads),
-                           delta=pct_delta(form_leads, p_form_data["total"]) if compare_enabled else None),
+                           fmt_number(_lead_val),
+                           delta=pct_delta(_lead_val, _p_lead_val) if compare_enabled else None),
                  unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -712,6 +757,10 @@ with col_right:
         layout2["barmode"] = "group"
         fig2.update_layout(**layout2, height=max(200, len(all_channels) * 52 + 60))
         st.plotly_chart(fig2, use_container_width=True)
+        st.caption(
+            "Note: GA4 may undercount due to ad blockers. "
+            "See the **Leads** page for accurate counts."
+        )
     else:
         st.markdown(kpi_card("Form Submissions by Channel", "No form data yet", muted=True),
                     unsafe_allow_html=True)
