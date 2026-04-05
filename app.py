@@ -572,9 +572,10 @@ with col_left:
 
         if compare_enabled and p_ga4 and p_ga4.get("channels"):
             pri_map = {r["channel"]: r["sessions"] for r in p_ga4["channels"]}
+            # Sort ascending by current sessions so largest appears at top in horizontal bar
             all_ch  = sorted(
                 cur_map.keys() | pri_map.keys(),
-                key=lambda c: -cur_map.get(c, 0),
+                key=lambda c: cur_map.get(c, 0),
             )
             cur_vals = [cur_map.get(c, 0) for c in all_ch]
             pri_vals = [pri_map.get(c, 0) for c in all_ch]
@@ -585,24 +586,31 @@ with col_left:
                 arrow = "↑" if pct >= 0 else "↓"
                 return f"{cur:,}  {arrow}{abs(pct):.0f}%"
 
+            def _delta_color(cur, pri):
+                if not pri: return theme["chart_font"]
+                return theme["accent"] if cur >= pri else theme["negative"]
+
             fig = go.Figure()
             fig.add_trace(go.Bar(
                 x=cur_vals, y=all_ch, orientation="h",
                 name="Current",
                 marker_color=[channel_color(c) for c in all_ch],
+                width=0.6,
                 text=[_delta_label(cur_map.get(c, 0), pri_map.get(c, 0)) for c in all_ch],
-                textposition="outside", textfont=dict(color=theme["chart_font"]),
+                textposition="outside",
+                textfont=dict(color=[_delta_color(cur_map.get(c, 0), pri_map.get(c, 0)) for c in all_ch]),
             ))
             fig.add_trace(go.Bar(
                 x=pri_vals, y=all_ch, orientation="h",
                 name="Prior",
-                marker_color=[_rgba(channel_color(c), 0.40) for c in all_ch],
+                marker_color=[_rgba(channel_color(c), 0.35) for c in all_ch],
+                width=0.4,
                 text=[f"{v:,}" for v in pri_vals],
                 textposition="outside", textfont=dict(color=theme["chart_font"]),
             ))
             layout_ch = chart_layout("Sessions by Channel", compact=True)
             layout_ch["barmode"] = "group"
-            fig.update_layout(**layout_ch, height=max(280, len(all_ch) * 52 + 60))
+            fig.update_layout(**layout_ch, height=max(300, len(all_ch) * 80))
         else:
             ch_df = pd.DataFrame(cur_ch).sort_values("sessions")
             fig = go.Figure(go.Bar(
@@ -807,7 +815,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 
 # ── Row 7: Referral Sources expander ─────────────────────────────────────────
 if ext_ok and ext_data and ext_data.get("referral_sources"):
-    with st.expander("Referral Sources"):
+    with st.expander("Referral Sources", expanded=True):
         rs_df = pd.DataFrame(ext_data["referral_sources"])
         rs_df["engagement_rate"] = rs_df["engagement_rate"].apply(lambda x: f"{x:.1f}%")
         st.dataframe(
@@ -821,7 +829,7 @@ if ext_ok and ext_data and ext_data.get("referral_sources"):
 
 # ── Row 8: Content Performance expander ──────────────────────────────────────
 if ext_ok and ext_data and ext_data.get("content_pages"):
-    with st.expander("Content Performance (/blog/, /resources/, /insights/)"):
+    with st.expander("Content Performance (/blog/, /resources/, /insights/)", expanded=True):
         cont_df = pd.DataFrame(ext_data["content_pages"])
         cont_df["avg_time_on_page"] = cont_df["avg_time_on_page"].apply(fmt_duration)
         st.dataframe(
