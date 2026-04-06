@@ -1081,23 +1081,6 @@ if ga4_ok:
     st.markdown("<br>", unsafe_allow_html=True)
 
 
-# ── Row 5: Sessions donut ─────────────────────────────────────────────────────
-if ga4_ok and ga4_data and ga4_data.get("channels"):
-    ch_df2 = pd.DataFrame(ga4_data["channels"])
-    fig3 = px.pie(ch_df2, values="sessions", names="channel",
-                  hole=0.52, color_discrete_sequence=theme["colors"])
-    fig3.update_layout(
-        title=dict(text="Sessions by Default Channel Group",
-                   font=dict(size=14, color=theme["chart_font"]), x=0),
-        plot_bgcolor=theme["chart_plot_bg"], paper_bgcolor=theme["chart_bg"],
-        font=dict(color=theme["chart_font"]),
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color=theme["chart_font"])),
-        margin=dict(t=50, b=20, l=20, r=20), height=340,
-    )
-    fig3.update_traces(textinfo="percent+label",
-                       textfont=dict(color=theme["chart_font"]))
-    st.plotly_chart(fig3, use_container_width=True)
-
 st.markdown("<br>", unsafe_allow_html=True)
 
 
