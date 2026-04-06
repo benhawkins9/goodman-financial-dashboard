@@ -824,7 +824,7 @@ if ga4_ok and ga4_data and ga4_data.get("devices"):
 
     _DEVICE_COLORS = {"Desktop": "#2196F3", "Mobile": "#4CAF50", "Tablet": "#FF9800"}
 
-    cur_dev   = ga4_data["devices"]
+    cur_dev     = ga4_data["devices"]
     cur_dev_map = {r["device"]: r["sessions"] for r in cur_dev}
     dev_total   = sum(cur_dev_map.values()) or 1
 
@@ -832,100 +832,43 @@ if ga4_ok and ga4_data and ga4_data.get("devices"):
     if compare_enabled and p_ga4 and p_ga4.get("devices"):
         p_dev_map = {r["device"]: r["sessions"] for r in p_ga4["devices"]}
 
-    # ── 3 metric cards ────────────────────────────────────────────────────────
-    dev_cols = st.columns(3)
-    for i, device in enumerate(["Desktop", "Mobile", "Tablet"]):
-        sess     = cur_dev_map.get(device, 0)
-        pct      = sess / dev_total * 100
-        p_sess   = p_dev_map.get(device, 0) if p_dev_map else None
-        delta    = pct_delta(sess, p_sess) if compare_enabled and p_sess else None
-        color    = _DEVICE_COLORS.get(device, theme["accent"])
-        card_html = (
-            f'<div style="background:{theme["card_bg"]};border:1px solid {theme["card_border"]};'
-            f'border-left:4px solid {color};border-radius:8px;padding:1.1rem 1.25rem;'
-            f'box-shadow:0 1px 3px rgba(0,0,0,0.08);height:100%;">'
-            f'<p style="color:{theme["text_secondary"]};font-size:11px;font-weight:500;'
-            f'text-transform:uppercase;letter-spacing:0.05em;margin:0 0 6px;">{device}</p>'
-            f'<h2 style="color:{theme["text_primary"]};font-size:28px;font-weight:600;'
-            f'margin:0;line-height:1.1;">{fmt_number(sess)}</h2>'
-            f'<p style="color:{theme["text_secondary"]};font-size:12px;margin:4px 0 0;">'
-            f'{pct:.1f}% of sessions</p>'
-        )
-        if delta is not None:
-            clr  = theme["accent"] if delta >= 0 else theme["negative"]
-            card_html += (
-                f'<p style="color:{clr};font-size:12px;font-weight:500;margin:2px 0 0;">'
-                f'{"▲" if delta >= 0 else "▼"} {abs(delta):.1f}%</p>'
-            )
-        card_html += "</div>"
-        dev_cols[i].markdown(card_html, unsafe_allow_html=True)
+    # Horizontal bar — sort ascending so largest is at top
+    sorted_dev     = sorted(cur_dev, key=lambda r: r["sessions"])
+    bar_labels     = [r["device"] for r in sorted_dev]
+    bar_vals       = [r["sessions"] for r in sorted_dev]
+    bar_colors     = [_DEVICE_COLORS.get(d, theme["accent"]) for d in bar_labels]
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    if compare_enabled and p_dev_map:
+        bar_text        = []
+        bar_font_colors = []
+        for r in sorted_dev:
+            cur_s = r["sessions"]
+            pri_s = p_dev_map.get(r["device"], 0)
+            if pri_s:
+                d     = (cur_s - pri_s) / pri_s * 100
+                arrow = "↑" if d >= 0 else "↓"
+                bar_text.append(f"{cur_s:,}  ({cur_s/dev_total*100:.1f}%)  {arrow}{abs(d):.0f}%")
+                bar_font_colors.append(theme["accent"] if d >= 0 else theme["negative"])
+            else:
+                bar_text.append(f"{cur_s:,}  ({cur_s/dev_total*100:.1f}%)")
+                bar_font_colors.append(theme["chart_font"])
+        textfont = dict(color=bar_font_colors)
+    else:
+        bar_text = [f"{v:,}  ({v/dev_total*100:.1f}%)" for v in bar_vals]
+        textfont = dict(color=theme["chart_font"])
 
-    # ── Donut chart ───────────────────────────────────────────────────────────
-    dev_col_left, dev_col_right = st.columns([1, 2])
-
-    with dev_col_left:
-        labels = [r["device"] for r in cur_dev]
-        values = [r["sessions"] for r in cur_dev]
-        colors = [_DEVICE_COLORS.get(d, theme["accent"]) for d in labels]
-
-        fig_dev_donut = go.Figure(go.Pie(
-            labels=labels, values=values,
-            hole=0.52,
-            marker_colors=colors,
-            textinfo="percent+label",
-            textfont=dict(color=theme["chart_font"]),
-            hovertemplate="%{label}: %{value:,} sessions (%{percent})<extra></extra>",
-        ))
-        fig_dev_donut.update_layout(
-            title=dict(text="Device Mix", font=dict(size=14, color=theme["chart_font"]), x=0),
-            plot_bgcolor=theme["chart_plot_bg"], paper_bgcolor=theme["chart_bg"],
-            font=dict(color=theme["chart_font"]),
-            legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color=theme["chart_font"])),
-            margin=dict(t=50, b=20, l=20, r=20),
-            height=280,
-        )
-        st.plotly_chart(fig_dev_donut, use_container_width=True)
-
-    with dev_col_right:
-        # Horizontal bar — sort ascending so largest is at top
-        sorted_dev = sorted(cur_dev, key=lambda r: r["sessions"])
-        bar_labels = [r["device"] for r in sorted_dev]
-        bar_vals   = [r["sessions"] for r in sorted_dev]
-        bar_colors = [_DEVICE_COLORS.get(d, theme["accent"]) for d in bar_labels]
-        bar_text   = [f"{v:,}  ({v/dev_total*100:.1f}%)" for v in bar_vals]
-
-        if compare_enabled and p_dev_map:
-            bar_text = []
-            bar_font_colors = []
-            for r in sorted_dev:
-                cur_s = r["sessions"]
-                pri_s = p_dev_map.get(r["device"], 0)
-                if pri_s:
-                    d = (cur_s - pri_s) / pri_s * 100
-                    arrow = "↑" if d >= 0 else "↓"
-                    bar_text.append(f"{cur_s:,}  ({cur_s/dev_total*100:.1f}%)  {arrow}{abs(d):.0f}%")
-                    bar_font_colors.append(theme["accent"] if d >= 0 else theme["negative"])
-                else:
-                    bar_text.append(f"{cur_s:,}  ({cur_s/dev_total*100:.1f}%)")
-                    bar_font_colors.append(theme["chart_font"])
-            textfont = dict(color=bar_font_colors)
-        else:
-            textfont = dict(color=theme["chart_font"])
-
-        fig_dev_bar = go.Figure(go.Bar(
-            x=bar_vals, y=bar_labels, orientation="h",
-            marker_color=bar_colors,
-            text=bar_text,
-            textposition="outside",
-            textfont=textfont,
-        ))
-        fig_dev_bar.update_layout(
-            **chart_layout("Sessions by Device", xaxis_title="Sessions", compact=True),
-            height=280,
-        )
-        st.plotly_chart(fig_dev_bar, use_container_width=True)
+    fig_dev_bar = go.Figure(go.Bar(
+        x=bar_vals, y=bar_labels, orientation="h",
+        marker_color=bar_colors,
+        text=bar_text,
+        textposition="outside",
+        textfont=textfont,
+    ))
+    fig_dev_bar.update_layout(
+        **chart_layout("Sessions by Device", xaxis_title="Sessions", compact=True),
+        height=220,
+    )
+    st.plotly_chart(fig_dev_bar, use_container_width=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
