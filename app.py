@@ -131,6 +131,42 @@ prior_start, prior_end = dates["prior_start"], dates["prior_end"]
 theme = get_theme()
 
 
+def _html_table(columns: list[str], rows: list[list], col_align: list[str] | None = None) -> str:
+    """
+    Render a list of rows as a theme-aware HTML table.
+    col_align: list of "left" | "right" | "center" per column (defaults to left).
+    Returns an HTML string safe for st.markdown(unsafe_allow_html=True).
+    """
+    t = get_theme()
+    aligns = col_align or ["left"] * len(columns)
+    th_style = (
+        f'padding:10px 12px;font-size:11px;font-weight:500;text-transform:uppercase;'
+        f'letter-spacing:0.05em;color:{t["text_secondary"]};'
+        f'border-bottom:1px solid {t["card_border"]};white-space:nowrap;'
+    )
+    html = (
+        f'<div style="background:{t["card_bg"]};border:1px solid {t["card_border"]};'
+        f'border-radius:8px;overflow:hidden;">'
+        f'<table style="width:100%;border-collapse:collapse;font-family:Inter,sans-serif;font-size:14px;">'
+        f'<thead><tr>'
+    )
+    for i, col in enumerate(columns):
+        html += f'<th style="{th_style}text-align:{aligns[i]};">{col}</th>'
+    html += "</tr></thead><tbody>"
+    for ri, row in enumerate(rows):
+        row_bg = t["card_bg"] if ri % 2 == 0 else t["bg"]
+        html += f'<tr style="background:{row_bg};">'
+        for i, cell in enumerate(row):
+            html += (
+                f'<td style="padding:8px 12px;color:{t["text_primary"]};'
+                f'text-align:{aligns[i]};border-bottom:1px solid {t["card_border"]};">'
+                f'{cell}</td>'
+            )
+        html += "</tr>"
+    html += "</tbody></table></div>"
+    return html
+
+
 # ── Fetch helpers ─────────────────────────────────────────────────────────────
 def _build_creds_dict():
     return {
@@ -1029,14 +1065,18 @@ if ext_ok and ext_data:
             st.markdown(f'<p style="color:{theme["text_primary"]};font-size:15px;'
                         f'font-weight:600;margin-bottom:0.5rem;">Top Converting Pages</p>',
                         unsafe_allow_html=True)
-            cp_df = pd.DataFrame(cp)
-            cp_df["conversion_rate"] = cp_df["conversion_rate"].apply(lambda x: f"{x:.2f}%")
-            st.dataframe(
-                cp_df.rename(columns={
-                    "page": "Page", "sessions": "Sessions",
-                    "conversions": "Conversions", "conversion_rate": "Conv. Rate"
-                }),
-                use_container_width=True, hide_index=True, height=280,
+            cp_rows = [
+                [r["page"], f'{r["sessions"]:,}', f'{r["conversions"]:,}',
+                 f'{r["conversion_rate"]:.2f}%']
+                for r in cp
+            ]
+            st.markdown(
+                _html_table(
+                    ["Page", "Sessions", "Conversions", "Conv. Rate"],
+                    cp_rows,
+                    col_align=["left", "right", "right", "right"],
+                ),
+                unsafe_allow_html=True,
             )
         else:
             st.info("No conversion data available. Configure conversion events in GA4.", icon="ℹ️")
@@ -1142,18 +1182,26 @@ else:
 st.markdown("<br>", unsafe_allow_html=True)
 
 
-# ── Row 7: Referral Sources expander ─────────────────────────────────────────
+# ── Row 7: Referral Sources ───────────────────────────────────────────────────
 if ext_ok and ext_data and ext_data.get("referral_sources"):
-    with st.expander("Referral Sources", expanded=True):
-        rs_df = pd.DataFrame(ext_data["referral_sources"])
-        rs_df["engagement_rate"] = rs_df["engagement_rate"].apply(lambda x: f"{x:.1f}%")
-        st.dataframe(
-            rs_df.rename(columns={
-                "source": "Source", "sessions": "Sessions",
-                "engaged_sessions": "Engaged Sessions", "engagement_rate": "Engagement Rate"
-            }),
-            use_container_width=True, hide_index=True,
-        )
+    st.markdown(
+        f'<p style="color:{theme["text_secondary"]};font-size:11px;font-weight:500;'
+        f'text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.75rem;">'
+        f'Referral Sources</p>',
+        unsafe_allow_html=True,
+    )
+    rs_rows = [
+        [r["source"], f'{r["sessions"]:,}', f'{r["engaged_sessions"]:,}', f'{r["engagement_rate"]:.1f}%']
+        for r in ext_data["referral_sources"]
+    ]
+    st.markdown(
+        _html_table(
+            ["Source", "Sessions", "Engaged Sessions", "Engagement Rate"],
+            rs_rows,
+            col_align=["left", "right", "right", "right"],
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 # ── Organic Search summary ────────────────────────────────────────────────────
