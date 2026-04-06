@@ -1037,13 +1037,15 @@ st.markdown(
     unsafe_allow_html=True,
 )
 if gsc_ok and gsc_data:
-    d_clicks = pct_delta(gsc_data["clicks"], p_gsc["clicks"])       if compare_enabled and p_gsc else None
+    d_clicks = pct_delta(gsc_data["clicks"],       p_gsc["clicks"])       if compare_enabled and p_gsc else None
     d_impr   = pct_delta(gsc_data["impressions"], p_gsc["impressions"]) if compare_enabled and p_gsc else None
+    d_ctr    = pct_delta(gsc_data["ctr"],         p_gsc["ctr"])         if compare_enabled and p_gsc else None
+    d_pos    = pct_delta(gsc_data["position"],    p_gsc["position"])    if compare_enabled and p_gsc else None
     sc1, sc2, sc3, sc4 = st.columns(4)
-    sc1.markdown(kpi_card("Clicks",       fmt_number(gsc_data["clicks"]),      delta=d_clicks), unsafe_allow_html=True)
-    sc2.markdown(kpi_card("Impressions",  fmt_number(gsc_data["impressions"]), delta=d_impr),   unsafe_allow_html=True)
-    sc3.markdown(kpi_card("Avg CTR",      fmt_pct(gsc_data["ctr"])),                           unsafe_allow_html=True)
-    sc4.markdown(kpi_card("Avg Position", f'{gsc_data["position"]:.1f}'),                      unsafe_allow_html=True)
+    sc1.markdown(kpi_card("Clicks",       fmt_number(gsc_data["clicks"]),      delta=d_clicks),                    unsafe_allow_html=True)
+    sc2.markdown(kpi_card("Impressions",  fmt_number(gsc_data["impressions"]), delta=d_impr),                      unsafe_allow_html=True)
+    sc3.markdown(kpi_card("Avg CTR",      fmt_pct(gsc_data["ctr"]),            delta=d_ctr),                       unsafe_allow_html=True)
+    sc4.markdown(kpi_card("Avg Position", f'{gsc_data["position"]:.1f}',       delta=d_pos, lower_is_better=True), unsafe_allow_html=True)
 else:
     st.info(f"Search Console not connected. {gsc_err[:100] if gsc_err else ''}", icon="ℹ️")
 

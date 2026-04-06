@@ -114,7 +114,10 @@ h1{{color:{tp}!important;font-weight:700;}}h2{{color:{tp}!important;font-weight:
 [data-testid="stMetricValue"]{{color:{tp}!important;}}
 [data-testid="stMetricLabel"]{{color:{ts}!important;}}
 div[data-testid="metric-container"]{{background-color:{cbg};border:1px solid {cbd};border-radius:8px;padding:16px;}}
-details[data-testid="stExpander"]>summary{{background-color:{cbg}!important;border:1px solid {cbd}!important;border-radius:8px!important;color:{tp}!important;}}
+details[data-testid="stExpander"]{{background-color:{cbg}!important;border:1px solid {cbd}!important;border-radius:8px!important;}}
+details[data-testid="stExpander"]>summary{{background-color:{cbg}!important;color:{tp}!important;}}
+details[data-testid="stExpander"]>summary p,details[data-testid="stExpander"]>summary span,details[data-testid="stExpander"]>summary svg{{color:{tp}!important;fill:{tp}!important;}}
+[data-testid="stExpanderDetails"]{{background-color:{cbg}!important;}}
 hr{{border-color:{cbd}!important;}}
 </style>""", unsafe_allow_html=True)
 
