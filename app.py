@@ -279,17 +279,37 @@ def fetch_ga4_extended(start, end):
         for r in dr.rows
     ]
 
-    # 3. Top converting pages (top 10 by conversions)
-    cr = run(["pagePath"], ["sessions", "conversions", "sessionConversionRate"],
-             [OrderBy(metric=OrderBy.MetricOrderBy(metric_name="conversions"), desc=True)], 10)
-    converting_pages = [
-        {"page":            r.dimension_values[0].value,
-         "sessions":        int(r.metric_values[0].value),
-         "conversions":     int(r.metric_values[1].value),
-         "conversion_rate": float(r.metric_values[2].value) * 100}
-        for r in cr.rows
-        if int(r.metric_values[1].value) > 0
-    ]
+    # 3. Top converting pages — match the two GA4 key events
+    # (form_submit + gform_submission) so this table aligns with the Form
+    # Submissions chart. GA4's generic `conversions` metric counts every
+    # event flagged as conversion, which produces inflated counts.
+    gform_filter = FilterExpression(filter=Filter(
+        field_name="eventName",
+        in_list_filter=Filter.InListFilter(
+            values=["form_submit", "gform_submission"],
+        ),
+    ))
+    fp = run(["pagePath"], ["eventCount"],
+             [OrderBy(metric=OrderBy.MetricOrderBy(metric_name="eventCount"), desc=True)],
+             50, dim_filter=gform_filter)
+    forms_by_page = {
+        r.dimension_values[0].value: int(r.metric_values[0].value)
+        for r in fp.rows
+        if int(r.metric_values[0].value) > 0
+    }
+    sp = run(["pagePath"], ["sessions"],
+             [OrderBy(metric=OrderBy.MetricOrderBy(metric_name="sessions"), desc=True)], 500)
+    sessions_by_page = {r.dimension_values[0].value: int(r.metric_values[0].value)
+                        for r in sp.rows}
+    converting_pages = sorted(
+        ({"page":            page,
+          "sessions":        sessions_by_page.get(page, 0),
+          "conversions":     count,
+          "conversion_rate": (count / sessions_by_page[page] * 100)
+                              if sessions_by_page.get(page, 0) > 0 else 0.0}
+         for page, count in forms_by_page.items()),
+        key=lambda r: -r["conversions"],
+    )[:10]
 
     # 4. Referral sources (filter: sessionMedium = "referral")
     ref_filter = FilterExpression(filter=Filter(
@@ -341,10 +361,9 @@ def fetch_ga4_form_submissions(start, end):
 
     gform_filter = FilterExpression(filter=Filter(
         field_name="eventName",
-        string_filter=Filter.StringFilter(
-            value="gform_submission",
-            match_type=Filter.StringFilter.MatchType.EXACT,
-        )
+        in_list_filter=Filter.InListFilter(
+            values=["form_submit", "gform_submission"],
+        ),
     ))
 
     # By channel group
@@ -419,13 +438,12 @@ def fetch_ga4_conversion_rate_by_source(start, end):
     sessions_map = {r.dimension_values[0].value: int(r.metric_values[0].value)
                     for r in sess_resp.rows}
 
-    # Call 2: gform_submission events by source
+    # Call 2: form key-event count by source (form_submit + gform_submission)
     gform_filter = FilterExpression(filter=Filter(
         field_name="eventName",
-        string_filter=Filter.StringFilter(
-            value="gform_submission",
-            match_type=Filter.StringFilter.MatchType.EXACT,
-        )
+        in_list_filter=Filter.InListFilter(
+            values=["form_submit", "gform_submission"],
+        ),
     ))
     conv_resp = client.run_report(RunReportRequest(
         property=prop,
@@ -1116,13 +1134,48 @@ if ext_ok and ext_data and ext_data.get("referral_sources"):
         f'Referral Sources</p>',
         unsafe_allow_html=True,
     )
-    rs_rows = [
-        [r["source"], f'{r["sessions"]:,}', f'{r["engaged_sessions"]:,}', f'{r["engagement_rate"]:.1f}%']
-        for r in ext_data["referral_sources"]
-    ]
+
+    p_ref_map = {}
+    if compare_enabled and p_ext_data and p_ext_data.get("referral_sources"):
+        p_ref_map = {r["source"]: r for r in p_ext_data["referral_sources"]}
+
+    def _delta_cell(curr, prev):
+        if not compare_enabled or prev is None or prev == 0:
+            return ""
+        pct = (curr - prev) / abs(prev) * 100
+        clr = theme["accent"] if pct >= 0 else theme["negative"]
+        arrow = "▲" if pct >= 0 else "▼"
+        return (f'<span style="color:{clr};font-size:12px;font-weight:500;'
+                f'margin-left:8px;">{arrow}{abs(pct):.0f}%</span>')
+
+    def _value_cell(curr_str, curr_num, prev_num):
+        return f'{curr_str}{_delta_cell(curr_num, prev_num)}'
+
+    if compare_enabled and p_ref_map:
+        rs_rows = []
+        for r in ext_data["referral_sources"]:
+            src = r["source"]
+            p = p_ref_map.get(src)
+            p_sess = p["sessions"]         if p else None
+            p_eng  = p["engaged_sessions"] if p else None
+            p_rate = p["engagement_rate"]  if p else None
+            rs_rows.append([
+                src,
+                _value_cell(f'{r["sessions"]:,}',         r["sessions"],         p_sess),
+                _value_cell(f'{r["engaged_sessions"]:,}', r["engaged_sessions"], p_eng),
+                _value_cell(f'{r["engagement_rate"]:.1f}%', r["engagement_rate"], p_rate),
+            ])
+        cols = ["Source", "Sessions vs prior", "Engaged Sessions vs prior", "Engagement Rate vs prior"]
+    else:
+        rs_rows = [
+            [r["source"], f'{r["sessions"]:,}', f'{r["engaged_sessions"]:,}', f'{r["engagement_rate"]:.1f}%']
+            for r in ext_data["referral_sources"]
+        ]
+        cols = ["Source", "Sessions", "Engaged Sessions", "Engagement Rate"]
+
     st.markdown(
         _html_table(
-            ["Source", "Sessions", "Engaged Sessions", "Engagement Rate"],
+            cols,
             rs_rows,
             col_align=["left", "right", "right", "right"],
         ),
@@ -1144,10 +1197,10 @@ if gsc_ok and gsc_data:
     d_ctr    = pct_delta(gsc_data["ctr"],         p_gsc["ctr"])         if compare_enabled and p_gsc else None
     d_pos    = pct_delta(gsc_data["position"],    p_gsc["position"])    if compare_enabled and p_gsc else None
     sc1, sc2, sc3, sc4 = st.columns(4)
-    sc1.markdown(kpi_card("Clicks",       fmt_number(gsc_data["clicks"]),      delta=d_clicks),                    unsafe_allow_html=True)
-    sc2.markdown(kpi_card("Impressions",  fmt_number(gsc_data["impressions"]), delta=d_impr),                      unsafe_allow_html=True)
-    sc3.markdown(kpi_card("Avg CTR",      fmt_pct(gsc_data["ctr"]),            delta=d_ctr),                       unsafe_allow_html=True)
-    sc4.markdown(kpi_card("Avg Position", f'{gsc_data["position"]:.1f}',       delta=d_pos, lower_is_better=True), unsafe_allow_html=True)
+    sc1.markdown(kpi_card("Clicks",       fmt_number(gsc_data["clicks"]),      delta=d_clicks, prominent=True),                    unsafe_allow_html=True)
+    sc2.markdown(kpi_card("Impressions",  fmt_number(gsc_data["impressions"]), delta=d_impr,   prominent=True),                    unsafe_allow_html=True)
+    sc3.markdown(kpi_card("Avg CTR",      fmt_pct(gsc_data["ctr"]),            delta=d_ctr,    prominent=True),                    unsafe_allow_html=True)
+    sc4.markdown(kpi_card("Avg Position", f'{gsc_data["position"]:.1f}',       delta=d_pos,    lower_is_better=True, prominent=True), unsafe_allow_html=True)
 else:
     st.info(f"Search Console not connected. {gsc_err[:100] if gsc_err else ''}", icon="ℹ️")
 

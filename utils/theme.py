@@ -123,20 +123,42 @@ hr{{border-color:{cbd}!important;}}
 
 
 # ── Shared UI components ──────────────────────────────────────────────────────
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
 def kpi_card(title: str, value: str, delta=None, muted: bool = False,
-             lower_is_better: bool = False) -> str:
-    """Return an HTML KPI card string using the active theme."""
+             lower_is_better: bool = False, prominent: bool = False) -> str:
+    """Return an HTML KPI card string using the active theme.
+
+    prominent=True color-codes the left border green/red based on trend
+    direction and renders the delta as a filled badge (used for GSC cards).
+    """
     theme = get_theme()
     vc = theme["text_secondary"] if muted else theme["text_primary"]
+
+    border_color = theme["accent"]
     dh = ""
     if delta is not None:
         positive = (delta < 0) if lower_is_better else (delta >= 0)
-        clr  = theme["accent"] if positive else theme["negative"]
-        dh   = (f'<p style="color:{clr};font-size:12px;font-weight:500;margin:4px 0 0;">'
-                f'{"▲" if delta >= 0 else "▼"} {abs(delta):.1f}%</p>')
+        clr      = theme["accent"] if positive else theme["negative"]
+        arrow    = "▲" if delta >= 0 else "▼"
+        if prominent:
+            border_color = clr
+            dh = (
+                f'<span style="display:inline-block;background:{_hex_to_rgba(clr,0.12)};'
+                f'color:{clr};font-size:12px;font-weight:600;padding:2px 8px;'
+                f'border-radius:10px;margin-top:6px;">'
+                f'{arrow} {abs(delta):.1f}%</span>'
+            )
+        else:
+            dh = (f'<p style="color:{clr};font-size:12px;font-weight:500;margin:4px 0 0;">'
+                  f'{arrow} {abs(delta):.1f}%</p>')
     return (
         f'<div style="background:{theme["card_bg"]};border:1px solid {theme["card_border"]};'
-        f'border-left:4px solid {theme["accent"]};border-radius:8px;padding:1.1rem 1.25rem;'
+        f'border-left:4px solid {border_color};border-radius:8px;padding:1.1rem 1.25rem;'
         f'box-shadow:0 1px 3px rgba(0,0,0,0.08);height:100%;">'
         f'<p style="color:{theme["text_secondary"]};font-size:11px;font-weight:500;'
         f'text-transform:uppercase;letter-spacing:0.05em;margin:0 0 6px;">{title}</p>'
