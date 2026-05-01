@@ -319,9 +319,11 @@ def fetch_ga4_extended(start, end):
             match_type=Filter.StringFilter.MatchType.EXACT,
         )
     ))
+    # Fetch a wide pool (200) so prior-period comparison can match any
+    # source currently in the top-10. The view still trims to 10 below.
     rr = run(["sessionSource"], ["sessions", "engagedSessions"],
              [OrderBy(metric=OrderBy.MetricOrderBy(metric_name="sessions"), desc=True)],
-             10, dim_filter=ref_filter)
+             200, dim_filter=ref_filter)
     referral_sources = [
         {"source":           r.dimension_values[0].value,
          "sessions":         int(r.metric_values[0].value),
@@ -1135,12 +1137,27 @@ if ext_ok and ext_data and ext_data.get("referral_sources"):
         unsafe_allow_html=True,
     )
 
+    # Display top 10 referral sources by sessions
+    top_refs = ext_data["referral_sources"][:10]
+
     p_ref_map = {}
     if compare_enabled and p_ext_data and p_ext_data.get("referral_sources"):
         p_ref_map = {r["source"]: r for r in p_ext_data["referral_sources"]}
 
-    def _delta_cell(curr, prev):
-        if not compare_enabled or prev is None or prev == 0:
+    def _new_badge():
+        clr = theme["accent"]
+        return (f'<span style="background:{_rgba(clr,0.12)};color:{clr};'
+                f'font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;'
+                f'margin-left:8px;letter-spacing:0.04em;">NEW</span>')
+
+    def _delta_cell(curr, prev, *, is_rate=False):
+        """is_rate=True suppresses NEW badge for engagement-rate column
+        (a rate of 0% prior is meaningless, not 'new')."""
+        if not compare_enabled:
+            return ""
+        if prev is None:
+            return "" if is_rate else _new_badge()
+        if prev == 0:
             return ""
         pct = (curr - prev) / abs(prev) * 100
         clr = theme["accent"] if pct >= 0 else theme["negative"]
@@ -1148,12 +1165,12 @@ if ext_ok and ext_data and ext_data.get("referral_sources"):
         return (f'<span style="color:{clr};font-size:12px;font-weight:500;'
                 f'margin-left:8px;">{arrow}{abs(pct):.0f}%</span>')
 
-    def _value_cell(curr_str, curr_num, prev_num):
-        return f'{curr_str}{_delta_cell(curr_num, prev_num)}'
+    def _value_cell(curr_str, curr_num, prev_num, *, is_rate=False):
+        return f'{curr_str}{_delta_cell(curr_num, prev_num, is_rate=is_rate)}'
 
     if compare_enabled and p_ref_map:
         rs_rows = []
-        for r in ext_data["referral_sources"]:
+        for r in top_refs:
             src = r["source"]
             p = p_ref_map.get(src)
             p_sess = p["sessions"]         if p else None
@@ -1161,15 +1178,15 @@ if ext_ok and ext_data and ext_data.get("referral_sources"):
             p_rate = p["engagement_rate"]  if p else None
             rs_rows.append([
                 src,
-                _value_cell(f'{r["sessions"]:,}',         r["sessions"],         p_sess),
-                _value_cell(f'{r["engaged_sessions"]:,}', r["engaged_sessions"], p_eng),
-                _value_cell(f'{r["engagement_rate"]:.1f}%', r["engagement_rate"], p_rate),
+                _value_cell(f'{r["sessions"]:,}',           r["sessions"],         p_sess),
+                _value_cell(f'{r["engaged_sessions"]:,}',   r["engaged_sessions"], p_eng),
+                _value_cell(f'{r["engagement_rate"]:.1f}%', r["engagement_rate"], p_rate, is_rate=True),
             ])
         cols = ["Source", "Sessions vs prior", "Engaged Sessions vs prior", "Engagement Rate vs prior"]
     else:
         rs_rows = [
             [r["source"], f'{r["sessions"]:,}', f'{r["engaged_sessions"]:,}', f'{r["engagement_rate"]:.1f}%']
-            for r in ext_data["referral_sources"]
+            for r in top_refs
         ]
         cols = ["Source", "Sessions", "Engaged Sessions", "Engagement Rate"]
 
