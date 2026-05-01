@@ -279,14 +279,17 @@ def fetch_ga4_extended(start, end):
         for r in dr.rows
     ]
 
-    # 3. Top converting pages — match the two GA4 key events
-    # (form_submit + gform_submission) so this table aligns with the Form
-    # Submissions chart. GA4's generic `conversions` metric counts every
-    # event flagged as conversion, which produces inflated counts.
+    # 3. Top converting pages — count form_submit only.
+    # GA4 Enhanced Measurement's form_submit fires for every form on the
+    # site (Gravity Forms AND newsletter widgets, etc.); Gravity Forms'
+    # own gform_submission event also fires on top of that for GF forms.
+    # Counting both = double-counting GF submissions. form_submit is the
+    # superset, so we use it alone.
     gform_filter = FilterExpression(filter=Filter(
         field_name="eventName",
-        in_list_filter=Filter.InListFilter(
-            values=["form_submit", "gform_submission"],
+        string_filter=Filter.StringFilter(
+            value="form_submit",
+            match_type=Filter.StringFilter.MatchType.EXACT,
         ),
     ))
     fp = run(["pagePath"], ["eventCount"],
@@ -333,7 +336,9 @@ def fetch_ga4_extended(start, end):
         for r in rr.rows
     ]
 
-    # 4b. Key events (form_submit + gform_submission) per referral source
+    # 4b. Key events (form_submit only — see comment on Top Converting
+    # Pages above; gform_submission double-counts on GF forms) per
+    # referral source.
     ke_filter = FilterExpression(and_group=FilterExpressionList(expressions=[
         FilterExpression(filter=Filter(
             field_name="sessionMedium",
@@ -344,8 +349,9 @@ def fetch_ga4_extended(start, end):
         )),
         FilterExpression(filter=Filter(
             field_name="eventName",
-            in_list_filter=Filter.InListFilter(
-                values=["form_submit", "gform_submission"],
+            string_filter=Filter.StringFilter(
+                value="form_submit",
+                match_type=Filter.StringFilter.MatchType.EXACT,
             ),
         )),
     ]))
@@ -385,10 +391,13 @@ def fetch_ga4_form_submissions(start, end):
     client = BetaAnalyticsDataClient(credentials=creds)
     prop = f"properties/{st.secrets['GA4_PROPERTY_ID']}"
 
+    # form_submit only — gform_submission double-counts GF form submissions
+    # because GA4 Enhanced Measurement also fires form_submit for them.
     gform_filter = FilterExpression(filter=Filter(
         field_name="eventName",
-        in_list_filter=Filter.InListFilter(
-            values=["form_submit", "gform_submission"],
+        string_filter=Filter.StringFilter(
+            value="form_submit",
+            match_type=Filter.StringFilter.MatchType.EXACT,
         ),
     ))
 
@@ -464,11 +473,14 @@ def fetch_ga4_conversion_rate_by_source(start, end):
     sessions_map = {r.dimension_values[0].value: int(r.metric_values[0].value)
                     for r in sess_resp.rows}
 
-    # Call 2: form key-event count by source (form_submit + gform_submission)
+    # Call 2: form key-event count by source — form_submit only.
+    # gform_submission double-counts GF submissions because Enhanced
+    # Measurement also fires form_submit for them.
     gform_filter = FilterExpression(filter=Filter(
         field_name="eventName",
-        in_list_filter=Filter.InListFilter(
-            values=["form_submit", "gform_submission"],
+        string_filter=Filter.StringFilter(
+            value="form_submit",
+            match_type=Filter.StringFilter.MatchType.EXACT,
         ),
     ))
     conv_resp = client.run_report(RunReportRequest(
