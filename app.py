@@ -234,7 +234,7 @@ def fetch_ga4_extended(start, end):
     from google.analytics.data_v1beta import BetaAnalyticsDataClient
     from google.analytics.data_v1beta.types import (
         RunReportRequest, DateRange, Dimension, Metric, OrderBy,
-        FilterExpression, Filter,
+        FilterExpression, FilterExpressionList, Filter,
     )
     from google.oauth2 import service_account
 
@@ -332,6 +332,30 @@ def fetch_ga4_extended(start, end):
                                max(int(r.metric_values[0].value), 1)) * 100}
         for r in rr.rows
     ]
+
+    # 4b. Key events (form_submit + gform_submission) per referral source
+    ke_filter = FilterExpression(and_group=FilterExpressionList(expressions=[
+        FilterExpression(filter=Filter(
+            field_name="sessionMedium",
+            string_filter=Filter.StringFilter(
+                value="referral",
+                match_type=Filter.StringFilter.MatchType.EXACT,
+            ),
+        )),
+        FilterExpression(filter=Filter(
+            field_name="eventName",
+            in_list_filter=Filter.InListFilter(
+                values=["form_submit", "gform_submission"],
+            ),
+        )),
+    ]))
+    ke_resp = run(["sessionSource"], ["eventCount"],
+                  [OrderBy(metric=OrderBy.MetricOrderBy(metric_name="eventCount"), desc=True)],
+                  200, dim_filter=ke_filter)
+    key_events_by_source = {r.dimension_values[0].value: int(r.metric_values[0].value)
+                            for r in ke_resp.rows}
+    for s in referral_sources:
+        s["key_events"] = key_events_by_source.get(s["source"], 0)
 
     return {
         "quality":          quality,
@@ -1176,25 +1200,29 @@ if ext_ok and ext_data and ext_data.get("referral_sources"):
             p_sess = p["sessions"]         if p else None
             p_eng  = p["engaged_sessions"] if p else None
             p_rate = p["engagement_rate"]  if p else None
+            p_ke   = p.get("key_events")   if p else None
             rs_rows.append([
                 src,
                 _value_cell(f'{r["sessions"]:,}',           r["sessions"],         p_sess),
                 _value_cell(f'{r["engaged_sessions"]:,}',   r["engaged_sessions"], p_eng),
                 _value_cell(f'{r["engagement_rate"]:.1f}%', r["engagement_rate"], p_rate, is_rate=True),
+                _value_cell(f'{r.get("key_events", 0)}',    r.get("key_events", 0), p_ke),
             ])
-        cols = ["Source", "Sessions vs prior", "Engaged Sessions vs prior", "Engagement Rate vs prior"]
+        cols = ["Source", "Sessions vs prior", "Engaged Sessions vs prior",
+                "Engagement Rate vs prior", "Key Events vs prior"]
     else:
         rs_rows = [
-            [r["source"], f'{r["sessions"]:,}', f'{r["engaged_sessions"]:,}', f'{r["engagement_rate"]:.1f}%']
+            [r["source"], f'{r["sessions"]:,}', f'{r["engaged_sessions"]:,}',
+             f'{r["engagement_rate"]:.1f}%', f'{r.get("key_events", 0)}']
             for r in top_refs
         ]
-        cols = ["Source", "Sessions", "Engaged Sessions", "Engagement Rate"]
+        cols = ["Source", "Sessions", "Engaged Sessions", "Engagement Rate", "Key Events"]
 
     st.markdown(
         _html_table(
             cols,
             rs_rows,
-            col_align=["left", "right", "right", "right"],
+            col_align=["left", "right", "right", "right", "right"],
         ),
         unsafe_allow_html=True,
     )
