@@ -10,10 +10,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
 import requests
-import hmac
-import hashlib
-import base64
-import time
+from requests.auth import HTTPBasicAuth
 import json
 
 st.set_page_config(
@@ -69,8 +66,7 @@ FORM_NAMES = {
 
 # Browser-like headers so Cloudflare's Bot Fight Mode lets the request
 # through. The default `python-requests/X.Y.Z` user-agent is 403'd at the
-# edge — that's the cause of the "Server: cloudflare / Content-Type: text/html"
-# 403 responses we were seeing.
+# edge.
 GF_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -82,31 +78,28 @@ GF_HEADERS = {
 
 
 # ── Authentication ────────────────────────────────────────────────────────────
-def get_gf_auth():
-    api_key     = st.secrets["GF_API_KEY"]
-    private_key = st.secrets["GF_PRIVATE_KEY"]
-    expires     = int(time.time()) + 3600
-    string_to_sign = f"{api_key}:{expires}"
-    sig = base64.b64encode(
-        hmac.new(
-            private_key.encode("utf-8"),
-            string_to_sign.encode("utf-8"),
-            hashlib.sha1,
-        ).digest()
-    ).decode("utf-8")
-    return api_key, sig, expires
+# Gravity Forms REST API v2 uses HTTP Basic Auth with a Consumer Key /
+# Consumer Secret pair generated under WP Admin → Forms → Settings →
+# REST API → API Version 2 → Add Key. We re-use the existing
+# GF_API_KEY / GF_PRIVATE_KEY secrets as those credentials.
+def get_gf_basic_auth() -> HTTPBasicAuth:
+    return HTTPBasicAuth(
+        st.secrets["GF_API_KEY"],
+        st.secrets["GF_PRIVATE_KEY"],
+    )
 
 
 # ── API debug ─────────────────────────────────────────────────────────────────
 def test_gf_connection():
-    api_key, sig, expires = get_gf_auth()
     base = st.secrets["GF_SITE_URL"].rstrip("/")
-
-    # Test basic API connectivity
-    test_url = f"{base}/gravityformsapi/?api_key={api_key}&signature={sig}&expires={expires}"
+    # GF v2 root: /wp-json/gf/v2 — should return a small JSON descriptor
+    test_url = f"{base}/wp-json/gf/v2/forms"
 
     try:
-        resp = requests.get(test_url, timeout=30, headers=GF_HEADERS)
+        resp = requests.get(
+            test_url, timeout=30,
+            headers=GF_HEADERS, auth=get_gf_basic_auth(),
+        )
         st.write("Status code:", resp.status_code)
         st.write("Response headers:", dict(resp.headers))
         st.write("Raw response (first 500 chars):", resp.text[:500])
@@ -117,11 +110,11 @@ def test_gf_connection():
 # ── Fetch entries ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_gf_entries(start_date, end_date):
-    api_key, sig, expires = get_gf_auth()
     base     = st.secrets["GF_SITE_URL"].rstrip("/")
     form_ids = st.secrets["GF_FORM_IDS"].split(",")
+    auth     = get_gf_basic_auth()
 
-    all_entries = []
+    all_entries: list = []
     for form_id in form_ids:
         page = 1
         while True:
@@ -129,24 +122,25 @@ def fetch_gf_entries(start_date, end_date):
                 "start_date": str(start_date),
                 "end_date":   str(end_date),
             })
-            url = (
-                f"{base}/gravityformsapi/entries/"
-                f"?api_key={api_key}&signature={sig}&expires={expires}"
-                f"&form_ids[]={form_id.strip()}"
-                f"&paging[page_size]=100&paging[current_page]={page}"
-                f"&search={search}"
-            )
-            resp = requests.get(url, timeout=30, headers=GF_HEADERS)
+            params = {
+                "form_ids[]":           form_id.strip(),
+                "paging[page_size]":    100,
+                "paging[current_page]": page,
+                "search":               search,
+            }
+            url = f"{base}/wp-json/gf/v2/entries"
+            resp = requests.get(url, params=params, timeout=30,
+                                 headers=GF_HEADERS, auth=auth)
+            resp.raise_for_status()
             data = resp.json()
 
-            if not data.get("response") or not data["response"].get("entries"):
+            entries = data.get("entries") or []
+            if not entries:
                 break
 
-            entries = data["response"]["entries"]
             all_entries.extend(entries)
-
-            total = data["response"].get("total_count", 0)
-            if len(all_entries) >= int(total):
+            total = int(data.get("total_count", 0) or 0)
+            if total and len(all_entries) >= total:
                 break
             page += 1
 

@@ -500,17 +500,19 @@ def fetch_ga4_conversion_rate_by_source(start, end):
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_gf_lead_count(start_date, end_date):
-    """Return total GF lead count across all configured form IDs."""
-    import hmac as _hmac, hashlib, base64, time as _time, json, requests as _req
-    api_key     = st.secrets["GF_API_KEY"]
-    private_key = st.secrets["GF_PRIVATE_KEY"]
-    base        = st.secrets["GF_SITE_URL"].rstrip("/")
-    form_ids    = st.secrets["GF_FORM_IDS"].split(",")
-    expires     = int(_time.time()) + 3600
-    string_to_sign = f"{api_key}:{expires}"
-    sig = base64.b64encode(
-        _hmac.new(private_key.encode(), string_to_sign.encode(), hashlib.sha1).digest()
-    ).decode()
+    """Return total GF lead count across all configured form IDs.
+
+    Uses the Gravity Forms REST API v2 (/wp-json/gf/v2/entries) with HTTP
+    Basic Auth — the legacy /gravityformsapi/ v1 endpoint has been
+    disabled on the site. GF_API_KEY / GF_PRIVATE_KEY are the v2
+    Consumer Key / Consumer Secret pair from WP Admin → Forms → Settings
+    → REST API → API Version 2.
+    """
+    import json, requests as _req
+    from requests.auth import HTTPBasicAuth
+    base     = st.secrets["GF_SITE_URL"].rstrip("/")
+    form_ids = st.secrets["GF_FORM_IDS"].split(",")
+    auth     = HTTPBasicAuth(st.secrets["GF_API_KEY"], st.secrets["GF_PRIVATE_KEY"])
     # Browser-like UA so Cloudflare Bot Fight Mode doesn't 403 us at the edge
     headers = {
         "User-Agent": (
@@ -523,16 +525,18 @@ def fetch_gf_lead_count(start_date, end_date):
     total = 0
     search = json.dumps({"start_date": str(start_date), "end_date": str(end_date)})
     for form_id in form_ids:
-        url = (
-            f"{base}/gravityformsapi/entries/"
-            f"?api_key={api_key}&signature={sig}&expires={expires}"
-            f"&form_ids[]={form_id.strip()}"
-            f"&paging[page_size]=1&paging[current_page]=1"
-            f"&search={search}"
-        )
+        params = {
+            "form_ids[]":           form_id.strip(),
+            "paging[page_size]":    1,
+            "paging[current_page]": 1,
+            "search":               search,
+        }
         try:
-            data = _req.get(url, timeout=15, headers=headers).json()
-            total += int(data.get("response", {}).get("total_count", 0))
+            resp = _req.get(f"{base}/wp-json/gf/v2/entries",
+                             params=params, timeout=15,
+                             headers=headers, auth=auth)
+            resp.raise_for_status()
+            total += int(resp.json().get("total_count", 0) or 0)
         except Exception:
             pass
     return total
