@@ -67,6 +67,20 @@ FORM_NAMES = {
 }
 
 
+# Browser-like headers so Cloudflare's Bot Fight Mode lets the request
+# through. The default `python-requests/X.Y.Z` user-agent is 403'd at the
+# edge — that's the cause of the "Server: cloudflare / Content-Type: text/html"
+# 403 responses we were seeing.
+GF_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
 # ── Authentication ────────────────────────────────────────────────────────────
 def get_gf_auth():
     api_key     = st.secrets["GF_API_KEY"]
@@ -92,7 +106,7 @@ def test_gf_connection():
     test_url = f"{base}/gravityformsapi/?api_key={api_key}&signature={sig}&expires={expires}"
 
     try:
-        resp = requests.get(test_url, timeout=30)
+        resp = requests.get(test_url, timeout=30, headers=GF_HEADERS)
         st.write("Status code:", resp.status_code)
         st.write("Response headers:", dict(resp.headers))
         st.write("Raw response (first 500 chars):", resp.text[:500])
@@ -122,7 +136,7 @@ def fetch_gf_entries(start_date, end_date):
                 f"&paging[page_size]=100&paging[current_page]={page}"
                 f"&search={search}"
             )
-            resp = requests.get(url, timeout=30)
+            resp = requests.get(url, timeout=30, headers=GF_HEADERS)
             data = resp.json()
 
             if not data.get("response") or not data["response"].get("entries"):

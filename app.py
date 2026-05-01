@@ -511,6 +511,15 @@ def fetch_gf_lead_count(start_date, end_date):
     sig = base64.b64encode(
         _hmac.new(private_key.encode(), string_to_sign.encode(), hashlib.sha1).digest()
     ).decode()
+    # Browser-like UA so Cloudflare Bot Fight Mode doesn't 403 us at the edge
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
     total = 0
     search = json.dumps({"start_date": str(start_date), "end_date": str(end_date)})
     for form_id in form_ids:
@@ -522,7 +531,7 @@ def fetch_gf_lead_count(start_date, end_date):
             f"&search={search}"
         )
         try:
-            data = _req.get(url, timeout=15).json()
+            data = _req.get(url, timeout=15, headers=headers).json()
             total += int(data.get("response", {}).get("total_count", 0))
         except Exception:
             pass
