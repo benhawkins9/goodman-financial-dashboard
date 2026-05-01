@@ -199,6 +199,45 @@ def fetch_gf_entries(start_date, end_date):
     return all_entries
 
 
+# ── Referrer → source/medium fallback ────────────────────────────────────────
+# When a visitor arrives without UTM params (e.g. an organic LinkedIn click
+# with no campaign tagging), the form's hidden utm_* fields are blank but
+# the referring_url field still captures the source. We derive a
+# source/medium pair from the referrer hostname so those visits don't
+# silently default to "direct".
+_REFERRER_RULES = [
+    ("linkedin.com",   ("linkedin",   "referral")),
+    ("lnkd.in",        ("linkedin",   "referral")),
+    ("facebook.com",   ("facebook",   "referral")),
+    ("fb.com",         ("facebook",   "referral")),
+    ("instagram.com",  ("instagram",  "referral")),
+    ("chatgpt.com",    ("chatgpt",    "referral")),
+    ("openai.com",     ("chatgpt",    "referral")),
+    ("perplexity.ai",  ("perplexity", "referral")),
+    ("bing.com",       ("bing",       "organic")),
+    ("duckduckgo.com", ("duckduckgo", "organic")),
+    ("google.",        ("google",     "organic")),
+    ("youtube.com",    ("youtube",    "referral")),
+    ("twitter.com",    ("twitter",    "referral")),
+    ("x.com",          ("twitter",    "referral")),
+    ("reddit.com",     ("reddit",     "referral")),
+]
+
+def _derive_source_from_referrer(referring_url: str) -> tuple[str, str] | None:
+    """Return (source, medium) inferred from a referring URL, or None."""
+    if not referring_url:
+        return None
+    host = referring_url.lower()
+    # Strip protocol and path quickly without importing urlparse
+    if "://" in host:
+        host = host.split("://", 1)[1]
+    host = host.split("/", 1)[0]
+    for needle, pair in _REFERRER_RULES:
+        if needle in host:
+            return pair
+    return None
+
+
 # ── Build DataFrame ───────────────────────────────────────────────────────────
 def build_df(entries: list, schemas: dict | None = None) -> pd.DataFrame:
     schemas = schemas or {}
@@ -235,7 +274,14 @@ def build_df(entries: list, schemas: dict | None = None) -> pd.DataFrame:
         for field_id, col_name in field_map.items():
             row[col_name] = entry.get(field_id, "") or ""
 
-        # Defaults for attribution fields
+        # If UTMs are empty but we captured a referring URL, derive
+        # source/medium from the referrer hostname (LinkedIn, Facebook,
+        # ChatGPT, Google organic, etc.) before falling back to direct.
+        if not row["utm_source"].strip():
+            inferred = _derive_source_from_referrer(row.get("referring_url", ""))
+            if inferred:
+                row["utm_source"], row["utm_medium"] = inferred
+
         if not row["utm_source"].strip():
             row["utm_source"] = "direct"
         if not row["utm_medium"].strip():
