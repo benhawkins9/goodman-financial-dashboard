@@ -107,6 +107,58 @@ def test_gf_connection():
         st.write("Connection error:", str(e))
 
 
+# ── Form schema (auto-discover name / email / phone field IDs) ───────────────
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_gf_form_schemas() -> dict:
+    """Return {form_id: {"name_first": "1.3", "name_last": "1.6",
+                          "email": "3", "phone": "4"}} for the configured forms.
+
+    Falls back to label-based matching when fields aren't typed as
+    name/email/phone.
+    """
+    base     = st.secrets["GF_SITE_URL"].rstrip("/")
+    form_ids = [f.strip() for f in st.secrets["GF_FORM_IDS"].split(",")]
+    auth     = get_gf_basic_auth()
+
+    schemas: dict = {}
+    for form_id in form_ids:
+        try:
+            resp = requests.get(
+                f"{base}/wp-json/gf/v2/forms/{form_id}",
+                timeout=20, headers=GF_HEADERS, auth=auth,
+            )
+            resp.raise_for_status()
+            form = resp.json()
+        except Exception:
+            schemas[form_id] = {}
+            continue
+
+        slot: dict = {}
+        for field in form.get("fields", []):
+            ftype = (field.get("type") or "").lower()
+            label = (field.get("label") or "").lower()
+            fid   = str(field.get("id") or "")
+
+            if ftype == "name" or "name" in label:
+                # Name field: prefer first/last sub-inputs
+                for inp in field.get("inputs") or []:
+                    sub_label = (inp.get("label") or "").lower()
+                    sub_id    = str(inp.get("id") or "")
+                    if "first" in sub_label and "name_first" not in slot:
+                        slot["name_first"] = sub_id
+                    elif "last" in sub_label and "name_last" not in slot:
+                        slot["name_last"] = sub_id
+                if not field.get("inputs") and "name_full" not in slot:
+                    slot["name_full"] = fid
+            elif ftype == "email" or "email" in label:
+                slot.setdefault("email", fid)
+            elif ftype == "phone" or "phone" in label:
+                slot.setdefault("phone", fid)
+
+        schemas[form_id] = slot
+    return schemas
+
+
 # ── Fetch entries ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_gf_entries(start_date, end_date):
@@ -148,16 +200,31 @@ def fetch_gf_entries(start_date, end_date):
 
 
 # ── Build DataFrame ───────────────────────────────────────────────────────────
-def build_df(entries: list) -> pd.DataFrame:
+def build_df(entries: list, schemas: dict | None = None) -> pd.DataFrame:
+    schemas = schemas or {}
     rows = []
     for entry in entries:
-        form_id  = str(entry.get("form_id", ""))
+        form_id   = str(entry.get("form_id", ""))
         field_map = FORM_FIELD_MAP.get(form_id, {})
+        slot      = schemas.get(form_id, {})
+
+        # Pull contact fields based on the auto-discovered schema
+        name_parts = []
+        if "name_first" in slot:
+            name_parts.append(str(entry.get(slot["name_first"], "") or "").strip())
+        if "name_last" in slot:
+            name_parts.append(str(entry.get(slot["name_last"], "") or "").strip())
+        if not name_parts and "name_full" in slot:
+            name_parts.append(str(entry.get(slot["name_full"], "") or "").strip())
+        contact_name = " ".join(p for p in name_parts if p)
 
         row = {
             "date":          entry.get("date_created", ""),
             "form_id":       form_id,
             "form_name":     FORM_NAMES.get(form_id, f"Form {form_id}"),
+            "name":          contact_name,
+            "email":         str(entry.get(slot.get("email", ""), "") or "").strip(),
+            "phone":         str(entry.get(slot.get("phone", ""), "") or "").strip(),
             "utm_source":    "",
             "utm_medium":    "",
             "utm_campaign":  "",
@@ -177,8 +244,8 @@ def build_df(entries: list) -> pd.DataFrame:
         rows.append(row)
 
     df = pd.DataFrame(rows, columns=[
-        "date", "form_name", "utm_source", "utm_medium",
-        "utm_campaign", "utm_content", "referring_url",
+        "date", "form_name", "name", "email", "phone",
+        "utm_source", "utm_medium", "utm_campaign", "utm_content", "referring_url",
     ])
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     return df
@@ -220,8 +287,13 @@ if st.button("Test API Connection"):
 # ── Fetch data ────────────────────────────────────────────────────────────────
 raw_entries   = []
 p_raw_entries = []
+form_schemas: dict = {}
 
 with st.spinner("Loading leads from Gravity Forms…"):
+    try:
+        form_schemas = fetch_gf_form_schemas()
+    except Exception:
+        form_schemas = {}
     try:
         raw_entries = fetch_gf_entries(start_date, end_date)
     except Exception as e:
@@ -238,8 +310,8 @@ if compare_enabled and prior_start:
         except Exception:
             p_raw_entries = []
 
-df      = build_df(raw_entries)
-p_df    = build_df(p_raw_entries)
+df      = build_df(raw_entries,   form_schemas)
+p_df    = build_df(p_raw_entries, form_schemas)
 total   = len(df)
 p_total = len(p_df)
 d_total = pct_delta(total, p_total) if compare_enabled and p_total else None
@@ -447,6 +519,9 @@ display_df["referring_url"] = display_df["referring_url"].apply(
 display_df = display_df.rename(columns={
     "date":          "Date",
     "form_name":     "Form",
+    "name":          "Name",
+    "email":         "Email",
+    "phone":         "Phone",
     "utm_source":    "Source",
     "utm_medium":    "Medium",
     "utm_campaign":  "Campaign",
@@ -454,6 +529,11 @@ display_df = display_df.rename(columns={
     "referring_url": "Referring URL",
 })
 display_df = display_df.drop(columns=["form_id"], errors="ignore")
+# Reorder so contact info sits next to date / form for easy scanning
+display_df = display_df[[
+    "Date", "Form", "Name", "Email", "Phone",
+    "Source", "Medium", "Campaign", "Content", "Referring URL",
+]]
 display_df = display_df.sort_values("Date", ascending=False).reset_index(drop=True)
 
 page_size = 10
