@@ -218,15 +218,15 @@ except Exception:
 
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 kpis = [
-    ("Sessions",     f"{data['sessions']:,}",             pct_delta(data['sessions'],     prior_data['sessions']     if prior_data else None)),
-    ("Active Users", f"{data['users']:,}",                pct_delta(data['users'],        prior_data['users']        if prior_data else None)),
-    ("Page Views",   f"{data['pageviews']:,}",            pct_delta(data['pageviews'],    prior_data['pageviews']    if prior_data else None)),
-    ("Bounce Rate",  f"{data['bounce_rate']:.1f}%",       pct_delta(data['bounce_rate'],  prior_data['bounce_rate']  if prior_data else None)),
-    ("Avg Session",  fmt_duration(data["avg_duration"]),  pct_delta(data['avg_duration'], prior_data['avg_duration'] if prior_data else None)),
-    ("Form Submissions", f"{form_submissions:,}",         pct_delta(form_submissions, prior_form_submissions if compare_enabled else None)),
+    ("Sessions",     f"{data['sessions']:,}",             pct_delta(data['sessions'],     prior_data['sessions']     if prior_data else None), False),
+    ("Active Users", f"{data['users']:,}",                pct_delta(data['users'],        prior_data['users']        if prior_data else None), False),
+    ("Page Views",   f"{data['pageviews']:,}",            pct_delta(data['pageviews'],    prior_data['pageviews']    if prior_data else None), False),
+    ("Bounce Rate",  f"{data['bounce_rate']:.1f}%",       pct_delta(data['bounce_rate'],  prior_data['bounce_rate']  if prior_data else None), True),
+    ("Avg Session",  fmt_duration(data["avg_duration"]),  pct_delta(data['avg_duration'], prior_data['avg_duration'] if prior_data else None), False),
+    ("Form Submissions", f"{form_submissions:,}",         pct_delta(form_submissions, prior_form_submissions if compare_enabled else None), False),
 ]
-for col, (title, val, delta) in zip([c1, c2, c3, c4, c5, c6], kpis):
-    col.markdown(kpi_card(title, val, delta), unsafe_allow_html=True)
+for col, (title, val, delta, lower_better) in zip([c1, c2, c3, c4, c5, c6], kpis):
+    col.markdown(kpi_card(title, val, delta, lower_is_better=lower_better), unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
 

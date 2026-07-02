@@ -581,17 +581,52 @@ def fetch_meta_summary(start, end):
         params={"time_range": {"since": start, "until": end}, "level": "account"},
     ))
     row = dict(rows[0]) if rows else {}
-    actions = row.get("actions", [])
-    leads = sum(int(a.get("value", 0)) for a in actions
-                if a.get("action_type") in ("lead", "offsite_conversion.fb_pixel_lead",
-                                            "offsite_conversion.fb_pixel_purchase", "purchase"))
+    # "lead"/"purchase" aggregates already include their fb_pixel_* variants;
+    # pixel types are fallbacks only, otherwise leads get double-counted.
+    by_type = {a.get("action_type"): int(a.get("value", 0)) for a in row.get("actions", [])}
+    leads = (by_type.get("lead",     by_type.get("offsite_conversion.fb_pixel_lead", 0))
+             + by_type.get("purchase", by_type.get("offsite_conversion.fb_pixel_purchase", 0)))
     return {"spend": float(row.get("spend", 0)), "impressions": int(row.get("impressions", 0)),
             "clicks": int(row.get("clicks", 0)), "ctr": float(row.get("ctr", 0)),
             "cpc": float(row.get("cpc", 0)), "leads": leads}
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_google_ads_summary(start, end):
+    from google.ads.googleads.client import GoogleAdsClient
+    config = {
+        "developer_token": st.secrets["GOOGLE_ADS_DEVELOPER_TOKEN"].strip(),
+        "client_id":       st.secrets["GOOGLE_ADS_CLIENT_ID"].strip(),
+        "client_secret":   st.secrets["GOOGLE_ADS_CLIENT_SECRET"].strip(),
+        "refresh_token":   st.secrets["GOOGLE_ADS_REFRESH_TOKEN"].strip(),
+        "use_proto_plus":  True,
+    }
+    login_cid = str(st.secrets.get("GOOGLE_ADS_LOGIN_CUSTOMER_ID", "")).strip()
+    if login_cid:
+        config["login_customer_id"] = login_cid.replace("-", "")
+    client  = GoogleAdsClient.load_from_dict(config)
+    service = client.get_service("GoogleAdsService")
+    cid     = str(st.secrets["GOOGLE_ADS_CUSTOMER_ID"]).strip().replace("-", "")
+
+    rows = []
+    for batch in service.search_stream(customer_id=cid, query=f"""
+            SELECT metrics.cost_micros, metrics.impressions, metrics.clicks,
+                   metrics.ctr, metrics.average_cpc, metrics.conversions
+            FROM customer WHERE segments.date BETWEEN '{start}' AND '{end}'"""):
+        rows.extend(batch.results)
+    m = rows[0].metrics if rows else None
+    return {
+        "spend":       m.cost_micros / 1e6 if m else 0.0,
+        "impressions": int(m.impressions)  if m else 0,
+        "clicks":      int(m.clicks)       if m else 0,
+        "ctr":         m.ctr * 100         if m else 0.0,
+        "cpc":         m.average_cpc / 1e6 if m else 0.0,
+        "conversions": float(m.conversions) if m else 0.0,
+    }
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
-def fetch_linkedin_summary():
+def fetch_linkedin_summary(range_start=None, range_end=None):
     import gspread
     from google.oauth2.service_account import Credentials
     creds = Credentials.from_service_account_info(
@@ -602,6 +637,14 @@ def fetch_linkedin_summary():
     gc = gspread.authorize(creds)
     ws = gc.open_by_key(st.secrets["LINKEDIN_SHEET_ID"]).get_worksheet(0)
     df = pd.DataFrame(ws.get_all_records())
+    # Filter to the selected range when the sheet has a date column
+    # (mirrors the LinkedIn page: fall back to the full sheet if no rows match)
+    date_col = next((c for c in ["Date", "date", "Week", "Month", "Period"] if c in df.columns), None)
+    if date_col and range_start and range_end:
+        parsed = pd.to_datetime(df[date_col], errors="coerce")
+        mask = (parsed.dt.date >= range_start) & (parsed.dt.date <= range_end)
+        if mask.any():
+            df = df[mask]
     out = {"rows": len(df)}
     for col in ["Impressions", "impressions"]:
         if col in df.columns: out["impressions"] = pd.to_numeric(df[col], errors="coerce").sum(); break
@@ -619,6 +662,7 @@ ga4_data, ga4_ok, ga4_err    = None, False, ""
 ext_data, ext_ok             = None, False
 gsc_data, gsc_ok, gsc_err    = None, False, ""
 meta_data, meta_ok, meta_err = None, False, ""
+gads_data, gads_ok, gads_err = None, False, ""
 li_data,  li_ok,  li_err     = None, False, ""
 form_data                    = {"total": 0, "channels": []}
 conv_rate_data               = []
@@ -642,11 +686,14 @@ with st.spinner("Loading data from all channels…"):
     except Exception as e: gsc_err  = str(e)
     try: meta_data = fetch_meta_summary(start_str, end_str); meta_ok = True
     except Exception as e: meta_err = str(e)
-    try: li_data   = fetch_linkedin_summary();               li_ok   = True
+    if st.secrets.get("GOOGLE_ADS_DEVELOPER_TOKEN", ""):
+        try: gads_data = fetch_google_ads_summary(start_str, end_str); gads_ok = True
+        except Exception as e: gads_err = str(e)
+    try: li_data   = fetch_linkedin_summary(start_date, end_date); li_ok = True
     except Exception as e: li_err   = str(e)
 
 # ── Fetch prior period ────────────────────────────────────────────────────────
-p_ga4 = p_gsc = p_meta = p_li = None
+p_ga4 = p_gsc = p_meta = p_gads = p_li = None
 p_ext_data       = None
 p_form_data      = {"total": 0, "channels": [], "daily_by_channel": []}
 p_conv_rate_data = []
@@ -667,7 +714,10 @@ if compare_enabled and prior_start_str:
         except: pass
         try: p_meta = fetch_meta_summary(prior_start_str, prior_end_str)
         except: pass
-        try: p_li   = fetch_linkedin_summary()
+        if gads_ok:
+            try: p_gads = fetch_google_ads_summary(prior_start_str, prior_end_str)
+            except: pass
+        try: p_li   = fetch_linkedin_summary(prior_start, prior_end)
         except: pass
 
 
@@ -685,7 +735,7 @@ st.markdown("---")
 
 badges = " &nbsp; ".join([
     source_badge("GA4", ga4_ok), source_badge("Search Console", gsc_ok),
-    source_badge("Google Ads", False), source_badge("Facebook Ads", meta_ok),
+    source_badge("Google Ads", gads_ok), source_badge("Facebook Ads", meta_ok),
     source_badge("LinkedIn", li_ok),
 ])
 st.markdown(badges, unsafe_allow_html=True)
@@ -698,20 +748,24 @@ fb_spend = meta_data["spend"]   if meta_ok and meta_data else 0.0
 fb_leads = meta_data["leads"]   if meta_ok and meta_data else 0
 li_spend = float(li_data.get("spend", 0)) if li_ok and li_data else 0.0
 li_leads = int(li_data.get("leads", 0))   if li_ok and li_data else 0
+gads_spend = gads_data["spend"]             if gads_ok and gads_data else 0.0
+gads_leads = int(gads_data["conversions"])  if gads_ok and gads_data else 0
 form_leads         = form_data["total"]
 # Use GF API count when available (more accurate than GA4 event count)
 organic_leads      = gf_leads if gf_ok else form_leads
-total_spend        = fb_spend + li_spend
-total_conversions  = fb_leads + li_leads + organic_leads  # paid leads + form submissions
-paid_leads         = fb_leads + li_leads                  # for CPL (spend-based)
+total_spend        = fb_spend + li_spend + gads_spend
+total_conversions  = fb_leads + li_leads + gads_leads + organic_leads  # paid leads + form submissions
+paid_leads         = fb_leads + li_leads + gads_leads                  # for CPL (spend-based)
 blended_cpl = (total_spend / paid_leads) if paid_leads > 0 else None
 
 p_fb_spend    = float(p_meta.get("spend", 0)) if compare_enabled and p_meta else 0.0
 p_li_spend    = float(p_li.get("spend", 0))   if compare_enabled and p_li  else 0.0
-p_total_spend = p_fb_spend + p_li_spend
+p_gads_spend  = p_gads["spend"]               if compare_enabled and p_gads else 0.0
+p_total_spend = p_fb_spend + p_li_spend + p_gads_spend
 p_fb_leads    = int(p_meta.get("leads", 0))   if compare_enabled and p_meta else 0
 p_li_leads    = int(p_li.get("leads", 0))     if compare_enabled and p_li  else 0
-p_paid_leads  = p_fb_leads + p_li_leads
+p_gads_leads  = int(p_gads["conversions"])    if compare_enabled and p_gads else 0
+p_paid_leads  = p_fb_leads + p_li_leads + p_gads_leads
 p_organic_leads = p_gf_leads if gf_ok else p_form_data["total"]
 p_total_conv  = p_paid_leads + p_organic_leads
 p_cpl         = (p_total_spend / p_paid_leads) if compare_enabled and p_paid_leads > 0 else None
@@ -730,8 +784,8 @@ c1.markdown(kpi_card("Total Sessions",     fmt_number(total_sessions) if total_s
                      delta=d_sessions, muted=not ga4_ok),              unsafe_allow_html=True)
 c2.markdown(kpi_card("Total Conversions",  fmt_number(total_conversions) if has_conv else "—",
                      delta=d_conv, muted=not has_conv),                unsafe_allow_html=True)
-c3.markdown(kpi_card("Total Ad Spend",     fmt_currency(total_spend) if (meta_ok or li_ok) else "—",
-                     delta=d_spend, muted=not (meta_ok or li_ok)),     unsafe_allow_html=True)
+c3.markdown(kpi_card("Total Ad Spend",     fmt_currency(total_spend) if (meta_ok or li_ok or gads_ok) else "—",
+                     delta=d_spend, muted=not (meta_ok or li_ok or gads_ok)), unsafe_allow_html=True)
 c4.markdown(kpi_card("Blended CPL",        fmt_currency(blended_cpl) if blended_cpl else "—",
                      delta=d_cpl, muted=blended_cpl is None),          unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
@@ -1160,7 +1214,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 cc1, cc2, cc3 = st.columns(3)
-cc1.markdown(cpl_card("Google Ads CPL", "—", connected=False), unsafe_allow_html=True)
+if gads_ok and gads_leads > 0 and gads_spend > 0:
+    cc1.markdown(cpl_card("Google Ads CPL", fmt_currency(gads_spend / gads_leads)), unsafe_allow_html=True)
+elif gads_ok:
+    cc1.markdown(cpl_card("Google Ads CPL", "No conversions tracked", connected=False), unsafe_allow_html=True)
+else:
+    cc1.markdown(cpl_card("Google Ads CPL", "—", connected=False), unsafe_allow_html=True)
 if li_ok and li_leads > 0 and li_spend > 0:
     cc2.markdown(cpl_card("LinkedIn CPL", fmt_currency(li_spend / li_leads)), unsafe_allow_html=True)
 elif li_ok:

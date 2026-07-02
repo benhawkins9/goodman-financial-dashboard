@@ -168,6 +168,7 @@ def fetch_gf_entries(start_date, end_date):
 
     all_entries: list = []
     for form_id in form_ids:
+        form_entries: list = []
         page = 1
         while True:
             search = json.dumps({
@@ -190,11 +191,12 @@ def fetch_gf_entries(start_date, end_date):
             if not entries:
                 break
 
-            all_entries.extend(entries)
+            form_entries.extend(entries)
             total = int(data.get("total_count", 0) or 0)
-            if total and len(all_entries) >= total:
+            if total and len(form_entries) >= total:
                 break
             page += 1
+        all_entries.extend(form_entries)
 
     return all_entries
 

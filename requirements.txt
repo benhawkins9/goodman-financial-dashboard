@@ -8,6 +8,9 @@ google-auth>=2.27.0
 google-auth-httplib2>=0.2.0
 google-api-python-client>=2.118.0
 
+# Google Ads
+google-ads>=24.1.0
+
 # Facebook / Meta Ads
 facebook-business>=18.0.4
 

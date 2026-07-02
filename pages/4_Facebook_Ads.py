@@ -25,6 +25,19 @@ apply_theme_css(theme)
 COLORS = theme["colors"]
 
 
+def count_lead_actions(actions: list) -> int:
+    """Count leads + purchases without double-counting.
+
+    Meta's "lead" / "purchase" action types are aggregates that already
+    include their "offsite_conversion.fb_pixel_*" pixel variants, so the
+    pixel types are only used as fallbacks when the aggregate is absent.
+    """
+    by_type = {a.get("action_type"): int(a.get("value", 0)) for a in actions}
+    leads     = by_type.get("lead",     by_type.get("offsite_conversion.fb_pixel_lead", 0))
+    purchases = by_type.get("purchase", by_type.get("offsite_conversion.fb_pixel_purchase", 0))
+    return leads + purchases
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_meta(start: str, end: str, account_id: str, access_token: str):
     from facebook_business.api import FacebookAdsApi
@@ -44,10 +57,7 @@ def fetch_meta(start: str, end: str, account_id: str, access_token: str):
         params={"time_range": time_range, "level": "account"},
     ))
     totals = dict(totals_list[0]) if totals_list else {}
-    actions = totals.get("actions", [])
-    leads = sum(int(a.get("value", 0)) for a in actions
-                if a.get("action_type") in ("lead", "offsite_conversion.fb_pixel_lead",
-                                            "offsite_conversion.fb_pixel_purchase", "purchase"))
+    leads = count_lead_actions(totals.get("actions", []))
 
     daily_rows = [
         {"date": dict(r).get("date_start",""), "spend": float(dict(r).get("spend",0)),
@@ -62,12 +72,10 @@ def fetch_meta(start: str, end: str, account_id: str, access_token: str):
     for row in account.get_insights(
         fields=common_fields + [AdsInsights.Field.campaign_name, AdsInsights.Field.actions],
         params={"time_range": time_range, "level": "campaign",
-                "sort": [{"field": "spend", "direction": "DESCENDING"}], "limit": 20},
+                "sort": ["spend_descending"], "limit": 20},
     ):
         d = dict(row)
-        conv = sum(int(a.get("value", 0)) for a in d.get("actions", [])
-                   if a.get("action_type") in ("lead", "offsite_conversion.fb_pixel_lead",
-                                               "offsite_conversion.fb_pixel_purchase", "purchase"))
+        conv = count_lead_actions(d.get("actions", []))
         campaign_rows.append({
             "campaign": d.get("campaign_name", "Unknown"),
             "spend": float(d.get("spend", 0)), "impressions": int(d.get("impressions", 0)),
@@ -84,7 +92,7 @@ def fetch_meta(start: str, end: str, account_id: str, access_token: str):
                     AdsInsights.Field.impressions, AdsInsights.Field.clicks,
                     AdsInsights.Field.ctr, AdsInsights.Field.cpc],
             params={"time_range": time_range, "level": "adset",
-                    "sort": [{"field": "spend", "direction": "DESCENDING"}], "limit": 20},
+                    "sort": ["spend_descending"], "limit": 20},
         )
     ]
 

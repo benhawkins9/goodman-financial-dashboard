@@ -135,7 +135,7 @@ date_col = next((c for c in ["Date","Week","Month","Period"] if c in df.columns)
 filtered_df = df.copy()
 if date_col:
     try:
-        filtered_df[date_col] = pd.to_datetime(filtered_df[date_col], infer_datetime_format=True, errors="coerce")
+        filtered_df[date_col] = pd.to_datetime(filtered_df[date_col], errors="coerce")
         mask = (filtered_df[date_col].dt.date >= start_date) & (filtered_df[date_col].dt.date <= end_date)
         if mask.any():
             filtered_df = filtered_df[mask]
