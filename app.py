@@ -626,6 +626,33 @@ def fetch_google_ads_summary(start, end):
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
+def fetch_callrail_summary(start, end):
+    """Return inbound call counts from CallRail for the range."""
+    import requests
+    headers = {"Authorization": f'Token token="{str(st.secrets["CALLRAIL_API_KEY"]).strip()}"'}
+    base = f"https://api.callrail.com/v3/a/{str(st.secrets['CALLRAIL_ACCOUNT_ID']).strip()}"
+    total = first_time = answered = 0
+    page = 1
+    while True:
+        resp = requests.get(f"{base}/calls.json", headers=headers, timeout=30, params={
+            "start_date": start, "end_date": end,
+            "per_page": 250, "page": page, "fields": "first_call",
+        })
+        resp.raise_for_status()
+        data = resp.json()
+        for c in data.get("calls", []):
+            if c.get("direction") not in (None, "inbound"):
+                continue
+            total += 1
+            first_time += bool(c.get("first_call"))
+            answered += bool(c.get("answered"))
+        if page >= int(data.get("total_pages", 1) or 1):
+            break
+        page += 1
+    return {"total": total, "first_time": first_time, "answered": answered}
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
 def fetch_linkedin_summary(range_start=None, range_end=None):
     import gspread
     from google.oauth2.service_account import Credentials
@@ -663,6 +690,7 @@ ext_data, ext_ok             = None, False
 gsc_data, gsc_ok, gsc_err    = None, False, ""
 meta_data, meta_ok, meta_err = None, False, ""
 gads_data, gads_ok, gads_err = None, False, ""
+cr_data,  cr_ok              = None, False
 li_data,  li_ok,  li_err     = None, False, ""
 form_data                    = {"total": 0, "channels": []}
 conv_rate_data               = []
@@ -689,11 +717,14 @@ with st.spinner("Loading data from all channels…"):
     if st.secrets.get("GOOGLE_ADS_DEVELOPER_TOKEN", ""):
         try: gads_data = fetch_google_ads_summary(start_str, end_str); gads_ok = True
         except Exception as e: gads_err = str(e)
+    if st.secrets.get("CALLRAIL_API_KEY", ""):
+        try: cr_data = fetch_callrail_summary(start_str, end_str); cr_ok = True
+        except Exception: pass
     try: li_data   = fetch_linkedin_summary(start_date, end_date); li_ok = True
     except Exception as e: li_err   = str(e)
 
 # ── Fetch prior period ────────────────────────────────────────────────────────
-p_ga4 = p_gsc = p_meta = p_gads = p_li = None
+p_ga4 = p_gsc = p_meta = p_gads = p_cr = p_li = None
 p_ext_data       = None
 p_form_data      = {"total": 0, "channels": [], "daily_by_channel": []}
 p_conv_rate_data = []
@@ -717,6 +748,9 @@ if compare_enabled and prior_start_str:
         if gads_ok:
             try: p_gads = fetch_google_ads_summary(prior_start_str, prior_end_str)
             except: pass
+        if cr_ok:
+            try: p_cr = fetch_callrail_summary(prior_start_str, prior_end_str)
+            except: pass
         try: p_li   = fetch_linkedin_summary(prior_start, prior_end)
         except: pass
 
@@ -736,7 +770,7 @@ st.markdown("---")
 badges = " &nbsp; ".join([
     source_badge("GA4", ga4_ok), source_badge("Search Console", gsc_ok),
     source_badge("Google Ads", gads_ok), source_badge("Facebook Ads", meta_ok),
-    source_badge("LinkedIn", li_ok),
+    source_badge("LinkedIn", li_ok), source_badge("CallRail", cr_ok),
 ])
 st.markdown(badges, unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
@@ -750,11 +784,13 @@ li_spend = float(li_data.get("spend", 0)) if li_ok and li_data else 0.0
 li_leads = int(li_data.get("leads", 0))   if li_ok and li_data else 0
 gads_spend = gads_data["spend"]             if gads_ok and gads_data else 0.0
 gads_leads = int(gads_data["conversions"])  if gads_ok and gads_data else 0
+call_leads = cr_data["first_time"] if cr_ok and cr_data else 0
 form_leads         = form_data["total"]
 # Use GF API count when available (more accurate than GA4 event count)
 organic_leads      = gf_leads if gf_ok else form_leads
 total_spend        = fb_spend + li_spend + gads_spend
-total_conversions  = fb_leads + li_leads + gads_leads + organic_leads  # paid leads + form submissions
+# paid leads + form submissions + first-time phone callers
+total_conversions  = fb_leads + li_leads + gads_leads + organic_leads + call_leads
 paid_leads         = fb_leads + li_leads + gads_leads                  # for CPL (spend-based)
 blended_cpl = (total_spend / paid_leads) if paid_leads > 0 else None
 
@@ -766,8 +802,9 @@ p_fb_leads    = int(p_meta.get("leads", 0))   if compare_enabled and p_meta else
 p_li_leads    = int(p_li.get("leads", 0))     if compare_enabled and p_li  else 0
 p_gads_leads  = int(p_gads["conversions"])    if compare_enabled and p_gads else 0
 p_paid_leads  = p_fb_leads + p_li_leads + p_gads_leads
+p_call_leads  = p_cr["first_time"] if compare_enabled and p_cr else 0
 p_organic_leads = p_gf_leads if gf_ok else p_form_data["total"]
-p_total_conv  = p_paid_leads + p_organic_leads
+p_total_conv  = p_paid_leads + p_organic_leads + p_call_leads
 p_cpl         = (p_total_spend / p_paid_leads) if compare_enabled and p_paid_leads > 0 else None
 
 d_sessions = pct_delta(total_sessions, p_ga4["sessions"]) if compare_enabled and p_ga4 else None
@@ -775,7 +812,7 @@ d_spend    = pct_delta(total_spend, p_total_spend)         if compare_enabled el
 d_conv     = pct_delta(total_conversions, p_total_conv)    if compare_enabled else None
 d_cpl      = pct_delta(blended_cpl, p_cpl)                if compare_enabled else None
 
-has_conv = ga4_ok or meta_ok or li_ok or gf_ok
+has_conv = ga4_ok or meta_ok or li_ok or gf_ok or cr_ok
 
 
 # ── Row 1: 4 main KPI cards ──────────────────────────────────────────────────
